@@ -141,6 +141,7 @@ textarea{width:100%;resize:vertical}
 .optchips{display:flex;flex-wrap:wrap;gap:6px}
 .optchip{display:inline-flex;align-items:center;gap:2px;padding:3px 4px 3px 10px;border-radius:999px;background:color-mix(in srgb,var(--kitchen) 12%,transparent);font-size:13px}
 .optchip button{border:0;background:none;padding:0 6px;color:var(--muted);font-size:15px}
+.optchip button.optname{color:var(--fg);font-size:13px;font-weight:400;padding:0 2px 0 0;white-space:normal;text-align:left}
 .cellwrap{display:flex;gap:2px;align-items:center}
 .cellwrap button{padding:4px 6px;border:0;background:none;color:var(--muted);font-size:15px}
 .picks{display:grid;gap:10px}
@@ -798,9 +799,11 @@ function viewKitchen(){
   return `${head("Kitchen", "Add the dishes you like to cook, let Tend suggest the week, then shop for exactly those on Saturday.")}
   <div class="stack">
   <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>My meal options</span><span class="small muted">${nOpts} dishes</span></h3>
-    <p class="small muted" style="margin:0">Type a dish and press Add. To add several at once, separate them with commas, like "Poha, Upma, Idli".</p>
+    <p class="small muted" style="margin:0">Type a dish and press Add. To add several at once, separate them with commas, like "Poha, Upma, Idli". Tap a dish to rename it.</p>
     <div class="optcols">${["B","L","D"].map(k => `<div class="optcol"><h4>${MEAL_NAMES[k]} · ${opts[k].length}</h4>
-      <div class="optchips">${opts[k].map((x, i) => `<span class="optchip">${esc(x)}<button type="button" data-act="opt-del" data-k="${k}" data-v="${i}" aria-label="Remove ${esc(x)}">×</button></span>`).join("") || `<span class="small muted">No ${MEAL_NAMES[k].toLowerCase()} options yet</span>`}</div>
+      <div class="optchips">${opts[k].map((x, i) => S.editOpt && S.editOpt.k === k && S.editOpt.i === i
+        ? `<form class="inline" data-form="opt-rename" data-k="${k}" data-i="${i}" style="width:100%"><input id="optedit" name="t" value="${esc(x)}" aria-label="Edit ${esc(x)}" required><button type="submit" class="primary">Save</button><button type="button" class="ghost" data-act="opt-edit-cancel">Cancel</button></form>`
+        : `<span class="optchip"><button type="button" class="optname" data-act="opt-edit" data-k="${k}" data-v="${i}" aria-label="Edit ${esc(x)}">${esc(x)}</button><button type="button" data-act="opt-del" data-k="${k}" data-v="${i}" aria-label="Remove ${esc(x)}">×</button></span>`).join("") || `<span class="small muted">No ${MEAL_NAMES[k].toLowerCase()} options yet</span>`}</div>
       <form class="inline" data-form="opt" data-k="${k}"><input id="opt-${k}" name="t" placeholder="Add ${MEAL_NAMES[k].toLowerCase()} dishes" aria-label="New ${MEAL_NAMES[k]} option" required><button type="submit">Add</button></form></div>`).join("")}</div></section>
   <div class="grid wide">
     <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>This week's menu</span><span class="row" style="gap:6px"><button type="button" data-act="suggest" data-v="empty" ${nOpts ? "" : "disabled"}>Fill empty days</button><button type="button" class="primary" data-act="suggest" data-v="all" ${nOpts ? "" : "disabled"}>Suggest a new week</button></span></h3>
@@ -830,6 +833,13 @@ function viewDaily(){
   <section class="card"><div class="row between"><b>Today</b><span class="prog">${done}/${items.length}<span class="meter" style="${C("temple")}"><i style="width:${items.length ? done / items.length * 100 : 0}%"></i></span></span></div></section>
   <div class="grid">${STACKS.filter(s => (groups[s.id] || []).length && !hiddenArea(s.area)).map(s => `<section class="card" style="${C(s.area)}"><h3><span class="t"><i class="dot"></i>${s.label}</span><span class="small muted">${groups[s.id].filter(it => doneOn(it.kind === "prep" ? it.t.id + ":prep" : it.t.id, date)).length}/${groups[s.id].length}</span></h3>
     <div class="checks">${groups[s.id].map(it => checkItem(it, date)).join("")}</div></section>`).join("")}</div>
+  <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Add a daily task</span></h3>
+    <form class="stack" data-form="daily-add" style="gap:10px">
+      <label class="field" for="da-label">Task<input id="da-label" name="label" placeholder="e.g. Vitamins, 10 min stretch, Water the tulsi" required></label>
+      <div class="two"><label class="field" for="da-stack">Part of the day<select id="da-stack" name="stack">${STACKS.map(st => `<option value="${st.id}" ${st.id === "morning" ? "selected" : ""}>${st.label}</option>`).join("")}</select></label>
+      <label class="field" for="da-min">Minutes<input id="da-min" name="min" type="number" min="1" max="300" value="10" required></label></div>
+      <div><button type="submit" class="primary">Add to Daily</button></div></form>
+    ${(M().custom || []).filter(c => c.freq === 1).length ? `<ul class="list">${M().custom.filter(c => c.freq === 1).map(c => `<li><span class="lbl"><b>${esc(c.label)}</b><span class="small muted">${(STACKS.find(st => st.id === c.stack) || {label:"Home today"}).label} · ${c.min} min</span></span><button type="button" class="x" data-act="custom-del" data-v="${c.id}" aria-label="Remove ${esc(c.label)}">×</button></li>`).join("")}</ul>` : ""}</section>
   <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Last 7 days</span><span class="small muted">filled = done</span></h3>
     <div class="scroll"><div class="daygrid"><span></span>${dates.map(d => `<span class="h">${DAYS[wd(d)][0]}</span>`).join("")}
     ${tasks.map(t => `<span class="nm" title="${esc(t.label)}">${esc(t.label)}${streak(t.id) > 1 ? ` <span class="muted">· ${streak(t.id)} in a row</span>` : ""}</span>${dates.map(d => `<span class="cell ${doneOn(t.id, d) ? "on" : ""}" style="${C(t.area)}" title="${esc(t.label)} · ${fmtDate(d)}"></span>`).join("")}`).join("")}</div></div></section>
@@ -1041,7 +1051,9 @@ document.addEventListener("click", e => {
     case "custom-del": m.custom = m.custom.filter(c => c.id !== v); delete m.slots[v]; saveMain(); break;
     case "supply-toggle": { const it = m.supply[+v], wk = addDays(today(), -wd(today())); it.w = it.w === wk ? "" : wk; saveMain(); break; }
     case "supply-del": m.supply.splice(+v, 1); saveMain(); break;
-    case "opt-del": m.mealOptions[b.dataset.k].splice(+v, 1); saveMain(); break;
+    case "opt-del": m.mealOptions[b.dataset.k].splice(+v, 1); S.editOpt = null; saveMain(); break;
+    case "opt-edit": S.editOpt = {k:b.dataset.k, i:+v}; draw(); setTimeout(() => { const n = document.getElementById("optedit"); if (n){ n.focus(); n.select(); } }, 0); break;
+    case "opt-edit-cancel": S.editOpt = null; draw(); break;
     case "suggest": suggestMenu(v === "all"); toast(v === "all" ? "Here's a fresh week. Tap ↻ to swap anything." : "Filled the empty days."); saveMain(); break;
     case "reroll": { const d = b.dataset.d, k = b.dataset.k, i = DAYS.indexOf(d); m.meals[d] = m.meals[d] || {};
       const cur = m.meals[d][k], prev = i ? m.meals[DAYS[i - 1]]?.[k] : null, next = m.meals[DAYS[i + 1]]?.[k];
@@ -1085,6 +1097,14 @@ document.addEventListener("submit", e => {
   const form = e.target, k = form.dataset.form; if (!k) return; e.preventDefault();
   const fd = new FormData(form), t = String(fd.get("t") || "").trim().slice(0, 80), m = M();
   if (k === "supply" && t) m.supply.push({t, w:""});
+  else if (k === "opt-rename" && t){ const key = form.dataset.k, i = +form.dataset.i, list = m.mealOptions[key], old = list[i];
+    if (list.some((y, j) => j !== i && y.toLowerCase() === t.toLowerCase())){ toast(`${t} is already in your list.`); return; }
+    list[i] = t.slice(0, 60); let n = 0; DAYS.forEach(d => { if (m.meals[d]?.[key] === old){ m.meals[d][key] = list[i]; n++; } });
+    S.editOpt = null; toast(n ? `Renamed. Updated ${n} day${n === 1 ? "" : "s"} in this week's menu.` : "Renamed."); }
+  else if (k === "daily-add"){ const label = String(fd.get("label") || "").trim().slice(0, 60); if (!label) return;
+    const st = STACKS.find(x => x.id === fd.get("stack")) || STACKS[0];
+    m.custom = m.custom || []; fresh(); m.custom.push({id:"c" + uidGen(), label, area:st.area, stack:st.id, freq:1, min:Math.max(1, +fd.get("min") || 10)});
+    toast(`Added ${label} to ${st.label}.`); }
   else if (k === "opt" && t){ const key = form.dataset.k; m.mealOptions = m.mealOptions || {B:[], L:[], D:[]};
     const list = m.mealOptions[key], add = String(fd.get("t")).split(",").map(x => x.trim().slice(0, 60)).filter(x => x && !list.some(y => y.toLowerCase() === x.toLowerCase()));
     list.push(...add); toast(add.length ? `Added ${add.length} ${MEAL_NAMES[key].toLowerCase()} option${add.length === 1 ? "" : "s"}.` : "Already in your list."); }
