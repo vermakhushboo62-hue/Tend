@@ -369,7 +369,7 @@ function defaults(){
   const meals = {}; DAYS.forEach(d => meals[d] = {B:"", L:"", D:""});
   return {cap:4, waterGoal:2500, glass:250, water:{}, meals, slots:{}, over:{}, custom:[], hidden:[], zones:ZONES_DEFAULT.slice(),
     supply:[{t:"Plan the menu for 7 days", w:""},{t:"Veggies + grocery list from the menu", w:""},{t:"Wash and chop veg", w:""},{t:"Cook dals, grains and sauces", w:""}],
-    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, mealOptions:{B:[], L:[], D:[]}, lastMenu:{}, events:[], activeEvent:null, timer:null, version:3};
+    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, mealOptions:{B:[], L:[], D:[]}, lastMenu:{}, events:[], activeEvent:null, lists:[], timer:null, version:3};
 }
 
 /* ================= helpers ================= */
@@ -548,7 +548,7 @@ function carried(){ // non-daily tasks from the last 6 days that never got done
 }
 
 /* ================= rendering ================= */
-const TABS = [["today","Today"],["daily","Daily"],["week","Week"],["plan","Plan"],["kitchen","Kitchen"],["host","Host"],["fun","Fun"],["insights","Insights"]];
+const TABS = [["today","Today"],["daily","Daily"],["week","Week"],["plan","Plan"],["kitchen","Kitchen"],["host","Host"],["fun","Fun"],["insights","Insights"],["lists","Lists"]];
 function drawTabs(){ $("#tabs").innerHTML = TABS.map(([id, label]) => `<button type="button" data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ""}>${label}</button>`).join(""); }
 function drawStatus(){
   $("#status").innerHTML = S.demo ? `<span class="pill demo">Example data · nothing is saved</span><button type="button" class="ghost" data-act="demo-off">Back to my data</button>`
@@ -557,7 +557,7 @@ function drawStatus(){
 function draw(){
   const a = document.activeElement, keepId = a && a.id, sel = a && "selectionStart" in a ? [a.selectionStart, a.selectionEnd] : null;
   fresh(); drawTabs(); drawStatus();
-  $("#view").innerHTML = ({today:viewToday, daily:viewDaily, week:viewWeek, plan:viewPlan, kitchen:viewKitchen, host:viewHost, fun:viewFun, insights:viewInsights}[S.tab] || viewToday)();
+  $("#view").innerHTML = ({today:viewToday, daily:viewDaily, week:viewWeek, plan:viewPlan, kitchen:viewKitchen, host:viewHost, fun:viewFun, insights:viewInsights, lists:viewLists}[S.tab] || viewToday)();
   if (keepId){ const n = document.getElementById(keepId); if (n && n !== a){ n.focus(); if (sel && n.setSelectionRange) try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
   tick();
 }
@@ -846,6 +846,24 @@ function viewDaily(){
   </div>`;
 }
 
+/* ================= plain lists ================= */
+function viewLists(){
+  const lists = M().lists || [];
+  const newForm = `<form class="inline" data-form="list-new"><input id="list-new" name="t" placeholder="Name a new list, e.g. Gift ideas" aria-label="New list name" required><button type="submit" class="primary">New list</button></form>`;
+  return `${head("Lists", "Plain checklists for everything else. Nothing here is scheduled or counted.")}
+  <div class="stack">
+  <section class="card">${newForm}</section>
+  ${lists.length ? `<div class="grid">${lists.map(l => { const open = l.items.filter(x => !x.done), done = l.items.filter(x => x.done);
+    const item = x => `<li><button type="button" class="check ${x.done ? "on" : ""}" style="${C("mind")};border:0;background:none;padding:2px 0" data-act="li-tick" data-l="${l.id}" data-v="${x.id}" aria-pressed="${!!x.done}"><span class="box">${x.done ? "✓" : ""}</span><span class="nm">${esc(x.t)}</span></button><button type="button" class="x" data-act="li-del" data-l="${l.id}" data-v="${x.id}" aria-label="Remove ${esc(x.t)}">×</button></li>`;
+    return `<section class="card"><h3><span class="t"><i class="dot" style="${C("mind")}"></i>${esc(l.name)}</span><span class="small muted">${done.length}/${l.items.length}</span></h3>
+      ${l.items.length ? `<ul class="list">${open.concat(done).map(item).join("")}</ul>` : `<div class="empty">Empty list. Add the first item below.</div>`}
+      <form class="inline" data-form="li-add" data-l="${l.id}"><input id="li-${l.id}" name="t" placeholder="Add an item" aria-label="Add to ${esc(l.name)}" required><button type="submit">Add</button></form>
+      <div class="row" style="justify-content:flex-end;gap:6px">${done.length ? `<button type="button" class="ghost" data-act="li-clear" data-l="${l.id}">Clear ticked</button>` : ""}
+        ${S.delList === l.id ? `<span class="small">Delete "${esc(l.name)}"?</span><button type="button" class="primary" data-act="list-del-yes" data-l="${l.id}">Delete</button><button type="button" class="ghost" data-act="list-del-no">Keep</button>` : `<button type="button" class="ghost" data-act="list-del" data-l="${l.id}">Delete list</button>`}</div></section>`; }).join("")}</div>`
+    : `<div class="empty">No lists yet. Name one above to start, like "Gift ideas" or "Things to fix".</div>`}
+  </div>`;
+}
+
 /* ================= hosting ================= */
 const HOST = [
   ["plan","Decide early","a week before",7,["Decide the menu","Decide the theme or dress code","Fix the guest list and head count","Send invites and confirm who's coming","Ask about allergies and food preferences","Plan where everyone sits","Make a music playlist"]],
@@ -1064,6 +1082,12 @@ document.addEventListener("click", e => {
     case "host-tick": { const ev = curEvent(); ev.checks[v] = !ev.checks[v]; if (!ev.checks[v]) delete ev.checks[v]; saveMain(); break; }
     case "host-del": { const ev = curEvent(); ev.custom = ev.custom.filter(c => c.id !== v); delete ev.checks["c:" + v]; saveMain(); break; }
     case "event-new": S.newEvent = true; draw(); break;
+    case "li-tick": { const l = m.lists.find(x => x.id === b.dataset.l), it = l && l.items.find(x => x.id === v); if (it){ it.done = !it.done; saveMain(); } break; }
+    case "li-del": { const l = m.lists.find(x => x.id === b.dataset.l); if (l){ l.items = l.items.filter(x => x.id !== v); saveMain(); } break; }
+    case "li-clear": { const l = m.lists.find(x => x.id === b.dataset.l); if (l){ const n = l.items.filter(x => x.done).length; l.items = l.items.filter(x => !x.done); toast(`Cleared ${plural(n, "ticked item")}.`); saveMain(); } break; }
+    case "list-del": S.delList = b.dataset.l; draw(); break;
+    case "list-del-no": S.delList = null; draw(); break;
+    case "list-del-yes": m.lists = m.lists.filter(x => x.id !== b.dataset.l); S.delList = null; saveMain(); break;
     case "event-cancel": S.newEvent = false; draw(); break;
     case "event-del": S.delEvent = true; draw(); break;
     case "event-del-no": S.delEvent = false; draw(); break;
@@ -1097,6 +1121,8 @@ document.addEventListener("submit", e => {
   const form = e.target, k = form.dataset.form; if (!k) return; e.preventDefault();
   const fd = new FormData(form), t = String(fd.get("t") || "").trim().slice(0, 80), m = M();
   if (k === "supply" && t) m.supply.push({t, w:""});
+  else if (k === "list-new" && t){ m.lists = m.lists || []; const id = uidGen(); m.lists.unshift({id, name:t.slice(0, 50), items:[]}); saveMain(); document.getElementById("li-" + id)?.focus(); return; }
+  else if (k === "li-add" && t){ const l = (m.lists || []).find(x => x.id === form.dataset.l); if (!l) return; l.items.push({id:uidGen(), t, done:false}); saveMain(); document.getElementById("li-" + l.id)?.focus(); return; }
   else if (k === "opt-rename" && t){ const key = form.dataset.k, i = +form.dataset.i, list = m.mealOptions[key], old = list[i];
     if (list.some((y, j) => j !== i && y.toLowerCase() === t.toLowerCase())){ toast(`${t} is already in your list.`); return; }
     list[i] = t.slice(0, 60); let n = 0; DAYS.forEach(d => { if (m.meals[d]?.[key] === old){ m.meals[d][key] = list[i]; n++; } });
