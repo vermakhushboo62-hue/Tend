@@ -130,6 +130,33 @@ textarea{width:100%;resize:vertical}
 @keyframes bob{from{transform:translateY(0)}to{transform:translateY(-1.5px)}}
 @keyframes hop{from{transform:translateY(0)}to{transform:translateY(-5px)}}
 .themebtn{display:inline-flex;gap:6px;align-items:center}
+.daygrid{display:grid;grid-template-columns:minmax(120px,1.4fr) repeat(7,minmax(22px,1fr));gap:4px;align-items:center;font-size:12.5px}
+.daygrid .h{color:var(--muted);text-align:center;font-weight:700}
+.daygrid .cell{height:20px;border-radius:5px;background:var(--sunk)}
+.daygrid .cell.on{background:var(--c,var(--temple))}
+.daygrid .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.optcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.optcol{display:grid;gap:8px;align-content:start}
+.optcol h4{margin:0;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--kitchen)}
+.optchips{display:flex;flex-wrap:wrap;gap:6px}
+.optchip{display:inline-flex;align-items:center;gap:2px;padding:3px 4px 3px 10px;border-radius:999px;background:color-mix(in srgb,var(--kitchen) 12%,transparent);font-size:13px}
+.optchip button{border:0;background:none;padding:0 6px;color:var(--muted);font-size:15px}
+.cellwrap{display:flex;gap:2px;align-items:center}
+.cellwrap button{padding:4px 6px;border:0;background:none;color:var(--muted);font-size:15px}
+.picks{display:grid;gap:10px}
+.picks h4{margin:0;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.hostsec .due{font-size:12px;font-weight:700;color:var(--play)}
+.list li .check{width:auto;flex:1 1 0;min-width:0}
+@media (max-width:620px){
+  main .meals table,main .meals tbody{display:block;min-width:0;width:100%}
+  .meals td .cellwrap{min-width:0}
+  .meals thead{display:none}
+  .meals tr{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;padding:8px 0;border-top:1px solid var(--line)}
+  .meals tr:first-child{border-top:0}
+  .meals th{padding:0}
+  .meals td{display:grid;grid-template-columns:76px minmax(0,1fr);align-items:center;gap:6px;padding:0}
+  .meals td::before{content:attr(data-l);font-size:12px;color:var(--muted)}
+}
 .check .nm small.why{color:var(--c,var(--ok));font-style:italic}
 .check.on .nm small.why{color:var(--muted)}
 .why-line{color:var(--temple);font-weight:700}
@@ -341,7 +368,7 @@ function defaults(){
   const meals = {}; DAYS.forEach(d => meals[d] = {B:"", L:"", D:""});
   return {cap:4, waterGoal:2500, glass:250, water:{}, meals, slots:{}, over:{}, custom:[], hidden:[], zones:ZONES_DEFAULT.slice(),
     supply:[{t:"Plan the menu for 7 days", w:""},{t:"Veggies + grocery list from the menu", w:""},{t:"Wash and chop veg", w:""},{t:"Cook dals, grains and sauces", w:""}],
-    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, timer:null, version:3};
+    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, mealOptions:{B:[], L:[], D:[]}, lastMenu:{}, events:[], activeEvent:null, timer:null, version:3};
 }
 
 /* ================= helpers ================= */
@@ -520,7 +547,7 @@ function carried(){ // non-daily tasks from the last 6 days that never got done
 }
 
 /* ================= rendering ================= */
-const TABS = [["today","Today"],["week","Week"],["plan","Plan"],["kitchen","Kitchen"],["fun","Fun"],["insights","Insights"]];
+const TABS = [["today","Today"],["daily","Daily"],["week","Week"],["plan","Plan"],["kitchen","Kitchen"],["host","Host"],["fun","Fun"],["insights","Insights"]];
 function drawTabs(){ $("#tabs").innerHTML = TABS.map(([id, label]) => `<button type="button" data-act="tab" data-v="${id}" ${S.tab === id ? 'aria-current="page"' : ""}>${label}</button>`).join(""); }
 function drawStatus(){
   $("#status").innerHTML = S.demo ? `<span class="pill demo">Example data · nothing is saved</span><button type="button" class="ghost" data-act="demo-off">Back to my data</button>`
@@ -529,7 +556,7 @@ function drawStatus(){
 function draw(){
   const a = document.activeElement, keepId = a && a.id, sel = a && "selectionStart" in a ? [a.selectionStart, a.selectionEnd] : null;
   fresh(); drawTabs(); drawStatus();
-  $("#view").innerHTML = ({today:viewToday, week:viewWeek, plan:viewPlan, kitchen:viewKitchen, fun:viewFun, insights:viewInsights}[S.tab] || viewToday)();
+  $("#view").innerHTML = ({today:viewToday, daily:viewDaily, week:viewWeek, plan:viewPlan, kitchen:viewKitchen, host:viewHost, fun:viewFun, insights:viewInsights}[S.tab] || viewToday)();
   if (keepId){ const n = document.getElementById(keepId); if (n && n !== a){ n.focus(); if (sel && n.setSelectionRange) try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
   tick();
 }
@@ -747,18 +774,104 @@ function viewPlan(){
   </div></div>`;
 }
 
+const MEAL_NAMES = {B:"Breakfast", L:"Lunch", D:"Dinner"};
+// pick a dish for each empty (or every) day: no repeats inside the week while options last, avoid last week's picks, never the same dish two days running
+function suggestMenu(all){
+  const m = M(), opts = m.mealOptions || {B:[], L:[], D:[]};
+  if (all) m.lastMenu = {B:DAYS.map(d => m.meals[d]?.B).filter(Boolean), L:DAYS.map(d => m.meals[d]?.L).filter(Boolean), D:DAYS.map(d => m.meals[d]?.D).filter(Boolean)};
+  ["B","L","D"].forEach(k => { const pool = opts[k] || []; if (!pool.length) return;
+    const last = new Set((m.lastMenu || {})[k] || []);
+    const used = new Set(all ? [] : DAYS.map(d => m.meals[d]?.[k]).filter(Boolean));
+    DAYS.forEach((d, i) => { m.meals[d] = m.meals[d] || {}; if (!all && m.meals[d][k]) return;
+      m.meals[d][k] = pickDish(pool, used, last, i ? m.meals[DAYS[i - 1]]?.[k] : null); used.add(m.meals[d][k]); }); });
+}
+function pickDish(pool, used, last, prev, next){
+  const ok = x => x !== prev && x !== next;
+  const tiers = [pool.filter(x => !used.has(x) && !last.has(x) && ok(x)), pool.filter(x => !used.has(x) && ok(x)), pool.filter(ok), pool];
+  const t = tiers.find(x => x.length); return t[Math.floor(Math.random() * t.length)];
+}
 function viewKitchen(){
-  const m = M(), td = DAYS[wd(today())], wk = addDays(today(), -wd(today()));
-  return `${head("Kitchen", "The weekly menu and the Saturday supply run. Daily cooking lives in your Kitchen routines on Today.")}
+  const m = M(), td = DAYS[wd(today())], wk = addDays(today(), -wd(today())), opts = m.mealOptions || {B:[], L:[], D:[]};
+  const nOpts = opts.B.length + opts.L.length + opts.D.length;
+  const picks = ["B","L","D"].map(k => { const by = {}; DAYS.forEach(d => { const x = m.meals[d]?.[k]; if (x) (by[x] = by[x] || []).push(d); });
+    const rows = Object.entries(by); return rows.length ? `<div><h4>${MEAL_NAMES[k]}</h4><ul class="list">${rows.map(([x, ds]) => `<li><span class="lbl"><b>${esc(x)}</b></span><span class="small muted">${ds.length > 1 ? ds.length + "× · " : ""}${ds.join(", ")}</span></li>`).join("")}</ul></div>` : ""; }).join("");
+  return `${head("Kitchen", "Add the dishes you like to cook, let Tend suggest the week, then shop for exactly those on Saturday.")}
+  <div class="stack">
+  <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>My meal options</span><span class="small muted">${nOpts} dishes</span></h3>
+    <p class="small muted" style="margin:0">Type a dish and press Add. To add several at once, separate them with commas, like "Poha, Upma, Idli".</p>
+    <div class="optcols">${["B","L","D"].map(k => `<div class="optcol"><h4>${MEAL_NAMES[k]} · ${opts[k].length}</h4>
+      <div class="optchips">${opts[k].map((x, i) => `<span class="optchip">${esc(x)}<button type="button" data-act="opt-del" data-k="${k}" data-v="${i}" aria-label="Remove ${esc(x)}">×</button></span>`).join("") || `<span class="small muted">No ${MEAL_NAMES[k].toLowerCase()} options yet</span>`}</div>
+      <form class="inline" data-form="opt" data-k="${k}"><input id="opt-${k}" name="t" placeholder="Add ${MEAL_NAMES[k].toLowerCase()} dishes" aria-label="New ${MEAL_NAMES[k]} option" required><button type="submit">Add</button></form></div>`).join("")}</div></section>
   <div class="grid wide">
-    <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>This week's menu</span><span class="small muted">saves when you leave a box</span></h3>
+    <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>This week's menu</span><span class="row" style="gap:6px"><button type="button" data-act="suggest" data-v="empty" ${nOpts ? "" : "disabled"}>Fill empty days</button><button type="button" class="primary" data-act="suggest" data-v="all" ${nOpts ? "" : "disabled"}>Suggest a new week</button></span></h3>
+      <p class="small muted" style="margin:0">${nOpts ? "Suggestions avoid repeating a dish within the week and skip last week's picks when there are enough options. Tap ↻ to swap one meal, or type over it." : "Add a few meal options above and Tend can suggest the whole week for you."}</p>
       <div class="meals"><table><thead><tr><th></th><th>Breakfast</th><th>Lunch</th><th>Dinner</th></tr></thead><tbody>
-      ${DAYS.map(d => `<tr class="${d === td ? "today" : ""}"><th>${d}</th>${["B","L","D"].map(k => `<td><input id="meal-${d}-${k}" data-field="meal" data-d="${d}" data-k="${k}" value="${esc(m.meals[d]?.[k])}" aria-label="${d} ${k}"></td>`).join("")}</tr>`).join("")}
+      ${DAYS.map(d => `<tr class="${d === td ? "today" : ""}"><th>${d}</th>${["B","L","D"].map(k => `<td data-l="${MEAL_NAMES[k]}"><span class="cellwrap"><input style="flex:1;min-width:0" id="meal-${d}-${k}" data-field="meal" data-d="${d}" data-k="${k}" value="${esc(m.meals[d]?.[k])}" aria-label="${d} ${MEAL_NAMES[k]}">${opts[k].length ? `<button type="button" data-act="reroll" data-d="${d}" data-k="${k}" aria-label="Swap ${d} ${MEAL_NAMES[k]}">↻</button>` : ""}</span></td>`).join("")}</tr>`).join("")}
       </tbody></table></div></section>
-    <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>Saturday supply run</span><span class="small muted">ticks reset every Monday</span></h3>
-      <ul class="list">${m.supply.map((b, i) => `<li><button type="button" class="check ${b.w === wk ? "on" : ""}" style="${C("kitchen")};border:0;background:none;padding:2px 0" data-act="supply-toggle" data-v="${i}"><span class="box">${b.w === wk ? "✓" : ""}</span><span class="nm">${esc(b.t)}</span></button><button type="button" class="x" data-act="supply-del" data-v="${i}" aria-label="Remove ${esc(b.t)}">×</button></li>`).join("")}</ul>
-      <form class="inline" data-form="supply"><input id="supply-new" name="t" placeholder="Add a step or item" aria-label="New supply item" required><button type="submit">Add</button></form></section>
+    <div class="stack">
+      <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>What you're cooking this week</span></h3>
+        ${picks ? `<div class="picks">${picks}</div><p class="small muted" style="margin:0">Buy the ingredients for these on Saturday's supply run.</p>` : `<div class="empty">Your week's dishes will be listed here once the menu has something in it.</div>`}</section>
+      <section class="card"><h3><span class="t"><i class="dot" style="${C("kitchen")}"></i>Saturday supply run</span><span class="small muted">ticks reset every Monday</span></h3>
+        <ul class="list">${m.supply.map((b, i) => `<li><button type="button" class="check ${b.w === wk ? "on" : ""}" style="${C("kitchen")};border:0;background:none;padding:2px 0" data-act="supply-toggle" data-v="${i}"><span class="box">${b.w === wk ? "✓" : ""}</span><span class="nm">${esc(b.t)}</span></button><button type="button" class="x" data-act="supply-del" data-v="${i}" aria-label="Remove ${esc(b.t)}">×</button></li>`).join("")}</ul>
+        <form class="inline" data-form="supply"><input id="supply-new" name="t" placeholder="Add a step or item" aria-label="New supply item" required><button type="submit">Add</button></form></section>
+    </div>
+  </div></div>`;
+}
+
+/* ================= daily routines tab ================= */
+function streak(id){ let n = 0, d = doneOn(id, today()) ? today() : addDays(today(), -1); while (doneOn(id, d)){ n++; d = addDays(d, -1); } return n; }
+function viewDaily(){
+  const date = today(), items = planFor(date).items.filter(it => it.t.freq === 1), groups = {};
+  items.forEach(it => { const st = it.t.stack || "home"; (groups[st] = groups[st] || []).push(it); });
+  const done = items.filter(it => doneOn(it.kind === "prep" ? it.t.id + ":prep" : it.t.id, date)).length, dates = lastNDates(7);
+  const tasks = TASKS().filter(t => t.freq === 1);
+  return `${head("Daily", "Your everyday routines in one place, kept off Today so it stays short. Tick them here for a while and see how they feel.")}
+  <div class="stack">
+  <section class="card"><div class="row between"><b>Today</b><span class="prog">${done}/${items.length}<span class="meter" style="${C("temple")}"><i style="width:${items.length ? done / items.length * 100 : 0}%"></i></span></span></div></section>
+  <div class="grid">${STACKS.filter(s => (groups[s.id] || []).length && !hiddenArea(s.area)).map(s => `<section class="card" style="${C(s.area)}"><h3><span class="t"><i class="dot"></i>${s.label}</span><span class="small muted">${groups[s.id].filter(it => doneOn(it.kind === "prep" ? it.t.id + ":prep" : it.t.id, date)).length}/${groups[s.id].length}</span></h3>
+    <div class="checks">${groups[s.id].map(it => checkItem(it, date)).join("")}</div></section>`).join("")}</div>
+  <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Last 7 days</span><span class="small muted">filled = done</span></h3>
+    <div class="scroll"><div class="daygrid"><span></span>${dates.map(d => `<span class="h">${DAYS[wd(d)][0]}</span>`).join("")}
+    ${tasks.map(t => `<span class="nm" title="${esc(t.label)}">${esc(t.label)}${streak(t.id) > 1 ? ` <span class="muted">· ${streak(t.id)} in a row</span>` : ""}</span>${dates.map(d => `<span class="cell ${doneOn(t.id, d) ? "on" : ""}" style="${C(t.area)}" title="${esc(t.label)} · ${fmtDate(d)}"></span>`).join("")}`).join("")}</div></div></section>
   </div>`;
+}
+
+/* ================= hosting ================= */
+const HOST = [
+  ["plan","Decide early","a week before",7,["Decide the menu","Decide the theme or dress code","Fix the guest list and head count","Send invites and confirm who's coming","Ask about allergies and food preferences","Plan where everyone sits","Make a music playlist"]],
+  ["shop","Shop and stock","3–4 days before",4,["Groceries and drinks for the menu","Ice, water bottles and soft drinks","Napkins, plates and extra cutlery","Snacks for when guests arrive","Return gifts or favours, if any"]],
+  ["loos","Washrooms, all 3","the day before",1,["Every toilet flushes and every tap works","Fresh hand towel in each washroom","Toilet paper placed, plus a spare roll","Hand soap refilled","Dustbin with a fresh liner","Air freshener","Mirrors wiped and floors dry"]],
+  ["home","Home","the day before",1,["Clean the hall, dining room and balcony","Clear surfaces and hide the clutter","Enough seating, cushions in place","A spot for shoes and bags","Fridge space for food and drinks","A phone charging spot","Wi-Fi password written on a card"]],
+  ["kitchen","Kitchen","day before and morning",1,["Cooking schedule: what gets made when","Serving dishes, spoons and glasses counted","Cook the make-ahead dishes","Empty sink and clean counters","Take the trash out"]],
+  ["day","On the day","the day itself",0,["Decorations and theme set up","Flowers or candles","Lights and music on","Mosquito repellent for balcony and terrace","Drinks chilled","Get ready 30 minutes before guests arrive"]],
+  ["after","After the party","the day after",-1,["Pack leftovers into boxes","Wash up and reset the kitchen","Trash out","Thank-you messages to guests"]],
+];
+function curEvent(){ const m = M(); return (m.events || []).find(e => e.id === m.activeEvent) || (m.events || [])[0] || null; }
+function viewHost(){
+  const m = M(), ev = curEvent();
+  const form = `<form class="stack" data-form="event" style="gap:10px"><label class="field" for="ev-name">What's the occasion?<input id="ev-name" name="name" placeholder="e.g. Diwali dinner" required></label>
+    <div class="two"><label class="field" for="ev-date">Date<input id="ev-date" name="date" type="date" min="${today()}" required></label><label class="field" for="ev-guests">Guests<input id="ev-guests" name="guests" type="number" min="1" value="8"></label></div>
+    <div><button type="submit" class="primary">Start the checklist</button></div></form>`;
+  if (!ev) return `${head("Host", "Getting the home ready for guests, step by step: decisions first, washrooms and home the day before, and the small things on the day.")}
+    <div class="grid"><section class="card"><h3><span class="t"><i class="dot" style="${C("play")}"></i>Plan an event</span></h3>${form}</section>
+    <section class="card"><h3><span class="t"><i class="dot" style="${C("play")}"></i>What the checklist covers</span></h3><ul class="list">${HOST.map(h => `<li><span class="lbl"><b>${h[1]}</b><span class="small muted">${h[2]} · ${h[4].length} items</span></span></li>`).join("")}</ul></section></div>`;
+  const days = diffDays(ev.date, today()), items = HOST.flatMap(h => h[4].map((t, i) => h[0] + ":" + i)).concat((ev.custom || []).map(c => "c:" + c.id));
+  const done = items.filter(k => ev.checks[k]).length;
+  const when = days > 1 ? `in ${days} days` : days === 1 ? "tomorrow" : days === 0 ? "today" : `${-days} day${days === -1 ? "" : "s"} ago`;
+  const secs = HOST.map(([id, label, timing, lead, list]) => { const keys = list.map((t, i) => [id + ":" + i, t]).concat((ev.custom || []).filter(c => c.sec === id).map(c => ["c:" + c.id, c.t, c.id]));
+    const n = keys.filter(([k]) => ev.checks[k]).length, dueNow = n < keys.length && days <= lead && days >= lead - 3;
+    return `<section class="card hostsec" style="${C("play")}"><h3><span class="t"><i class="dot"></i>${label}</span><span class="small muted">${n}/${keys.length}</span></h3>
+      <div class="small muted">${timing}${dueNow ? ` · <span class="due">do these now</span>` : ""}</div>
+      <div class="checks">${keys.map(([k, t, cid]) => `<div style="display:grid;grid-template-columns:1fr auto;gap:4px;align-items:center"><button type="button" class="check ${ev.checks[k] ? "on" : ""}" style="${C("play")}" data-act="host-tick" data-v="${k}" aria-pressed="${!!ev.checks[k]}"><span class="box">${ev.checks[k] ? "✓" : ""}</span><span class="nm">${esc(t)}</span></button>${cid ? `<button type="button" class="x" data-act="host-del" data-v="${cid}" aria-label="Remove ${esc(t)}">×</button>` : "<span></span>"}</div>`).join("")}</div>
+      <form class="inline" data-form="host-item" data-k="${id}"><input id="hi-${id}" name="t" placeholder="Add your own" aria-label="Add to ${label}" required><button type="submit">Add</button></form></section>`; }).join("");
+  return `${head("Host", "Getting the home ready for guests, step by step. Sections light up when it's time to do them.",
+      `<div class="row" style="gap:6px">${(m.events || []).length > 1 ? `<select id="ev-pick" data-field="event-pick" aria-label="Choose event">${m.events.map(e => `<option value="${e.id}" ${e.id === ev.id ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : ""}<button type="button" data-act="event-new">New event</button></div>`)}
+    <div class="stack">
+    ${S.newEvent ? `<section class="card"><h3><span class="t"><i class="dot" style="${C("play")}"></i>Plan another event</span><button type="button" class="ghost" data-act="event-cancel">Cancel</button></h3>${form}</section>` : ""}
+    <section class="card"><div class="row between"><div><div class="big" style="font-size:24px">${esc(ev.name)}</div><div class="small muted">${fmtDate(ev.date)} · ${when}${ev.guests ? ` · ${ev.guests} guests` : ""}</div></div>
+      <span class="prog">${done}/${items.length} ready<span class="meter" style="${C("play")}"><i style="width:${items.length ? done / items.length * 100 : 0}%"></i></span></span></div>
+      <div class="row" style="justify-content:flex-end">${S.delEvent ? `<span class="small">Delete this event and its checklist?</span><button type="button" class="primary" data-act="event-del-yes">Delete</button><button type="button" class="ghost" data-act="event-del-no">Keep it</button>` : `<button type="button" class="ghost" data-act="event-del">Delete event</button>`}</div></section>
+    <div class="grid">${secs}</div></div>`;
 }
 
 function stars(kind, i, n){ return `<span class="stars" role="group" aria-label="Rating">${[1,2,3,4,5].map(s => `<button type="button" class="${s <= n ? "on" : ""}" data-act="rate" data-k="${kind}" data-i="${i}" data-v="${s}" aria-label="${s} star${s > 1 ? "s" : ""}">★</button>`).join("")}</span>`; }
@@ -928,6 +1041,21 @@ document.addEventListener("click", e => {
     case "custom-del": m.custom = m.custom.filter(c => c.id !== v); delete m.slots[v]; saveMain(); break;
     case "supply-toggle": { const it = m.supply[+v], wk = addDays(today(), -wd(today())); it.w = it.w === wk ? "" : wk; saveMain(); break; }
     case "supply-del": m.supply.splice(+v, 1); saveMain(); break;
+    case "opt-del": m.mealOptions[b.dataset.k].splice(+v, 1); saveMain(); break;
+    case "suggest": suggestMenu(v === "all"); toast(v === "all" ? "Here's a fresh week. Tap ↻ to swap anything." : "Filled the empty days."); saveMain(); break;
+    case "reroll": { const d = b.dataset.d, k = b.dataset.k, i = DAYS.indexOf(d); m.meals[d] = m.meals[d] || {};
+      const cur = m.meals[d][k], prev = i ? m.meals[DAYS[i - 1]]?.[k] : null, next = m.meals[DAYS[i + 1]]?.[k];
+      const cands = (m.mealOptions[k] || []).filter(x => x !== cur && x !== prev && x !== next);
+      if (!cands.length){ toast("No other dish fits here without repeating the day before or after. Add more options."); break; }
+      const used = new Set(DAYS.filter(x => x !== d).map(x => m.meals[x]?.[k]).filter(Boolean));
+      m.meals[d][k] = pickDish(cands, used, new Set(), null, null); saveMain(); break; }
+    case "host-tick": { const ev = curEvent(); ev.checks[v] = !ev.checks[v]; if (!ev.checks[v]) delete ev.checks[v]; saveMain(); break; }
+    case "host-del": { const ev = curEvent(); ev.custom = ev.custom.filter(c => c.id !== v); delete ev.checks["c:" + v]; saveMain(); break; }
+    case "event-new": S.newEvent = true; draw(); break;
+    case "event-cancel": S.newEvent = false; draw(); break;
+    case "event-del": S.delEvent = true; draw(); break;
+    case "event-del-no": S.delEvent = false; draw(); break;
+    case "event-del-yes": { const ev = curEvent(); m.events = m.events.filter(e => e.id !== ev.id); m.activeEvent = m.events[0]?.id || null; S.delEvent = false; saveMain(); break; }
     case "fun-done": { const k = b.dataset.k; m[k][+b.dataset.i].done = true; saveMain(); openLog({movies:"movie", picnics:"picnic"}[k]); break; }
     case "fun-del": m[b.dataset.k].splice(+b.dataset.i, 1); saveMain(); break;
     case "rate": m[b.dataset.k][+b.dataset.i].r = +v; saveMain(); break;
@@ -940,7 +1068,8 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("change", e => {
   const el = e.target, f = el.dataset && el.dataset.field; if (!f) return; const m = M(); fresh();
-  if (f === "meal"){ m.meals[el.dataset.d] = m.meals[el.dataset.d] || {}; m.meals[el.dataset.d][el.dataset.k] = el.value.slice(0, 80); }
+  if (f === "event-pick"){ m.activeEvent = el.value; }
+  else if (f === "meal"){ m.meals[el.dataset.d] = m.meals[el.dataset.d] || {}; m.meals[el.dataset.d][el.dataset.k] = el.value.slice(0, 80); }
   else if (f === "freq" || f === "min"){ const id = el.dataset.id, c = (m.custom || []).find(x => x.id === id), val = Math.max(0, Math.min(600, +el.value || 0));
     if (c) c[f] = f === "freq" ? (+el.value || 7) : val;
     else { m.over = m.over || {}; const o = m.over[id] = m.over[id] || {}; o[f] = f === "freq" ? +el.value : val; const base = CAT.find(x => x.id === id); if (o.freq === base.freq) delete o.freq; if (o.min === base.min) delete o.min; }
@@ -956,6 +1085,13 @@ document.addEventListener("submit", e => {
   const form = e.target, k = form.dataset.form; if (!k) return; e.preventDefault();
   const fd = new FormData(form), t = String(fd.get("t") || "").trim().slice(0, 80), m = M();
   if (k === "supply" && t) m.supply.push({t, w:""});
+  else if (k === "opt" && t){ const key = form.dataset.k; m.mealOptions = m.mealOptions || {B:[], L:[], D:[]};
+    const list = m.mealOptions[key], add = String(fd.get("t")).split(",").map(x => x.trim().slice(0, 60)).filter(x => x && !list.some(y => y.toLowerCase() === x.toLowerCase()));
+    list.push(...add); toast(add.length ? `Added ${add.length} ${MEAL_NAMES[key].toLowerCase()} option${add.length === 1 ? "" : "s"}.` : "Already in your list."); }
+  else if (k === "host-item" && t){ const ev = curEvent(); ev.custom = ev.custom || []; ev.custom.push({id:uidGen(), sec:form.dataset.k, t}); }
+  else if (k === "event"){ const name = String(fd.get("name") || "").trim().slice(0, 60); if (!name || !fd.get("date")) return;
+    const ev = {id:uidGen(), name, date:String(fd.get("date")), guests:+fd.get("guests") || 0, checks:{}, custom:[]};
+    m.events = m.events || []; m.events.unshift(ev); m.activeEvent = ev.id; S.newEvent = false; toast(`Checklist ready for ${name}.`); }
   else if (k === "movies" && t) m.movies.unshift({t, done:false});
   else if (k === "picnics" && t) m.picnics.unshift({t, done:false});
   else if (k === "tours" && t) m.tours.unshift({t, budget:String(fd.get("budget") || "").slice(0, 20), s:"Dreaming"});
