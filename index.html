@@ -147,6 +147,7 @@ textarea{width:100%;resize:vertical}
 .picks{display:grid;gap:10px}
 .picks h4{margin:0;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .hostsec .due{font-size:12px;font-weight:700;color:var(--play)}
+button.listname{border:0;background:none;padding:0;font:inherit;font-family:var(--display);font-size:17px;font-weight:700;color:var(--fg);white-space:normal;text-align:left}
 .list li .check{width:auto;flex:1 1 0;min-width:0}
 @media (max-width:620px){
   main .meals table,main .meals tbody{display:block;min-width:0;width:100%}
@@ -894,8 +895,13 @@ function viewLists(){
   <div class="stack">
   <section class="card">${newForm}</section>
   ${lists.length ? `<div class="grid">${lists.map(l => { const open = l.items.filter(x => !x.done), done = l.items.filter(x => x.done);
-    const item = x => `<li><button type="button" class="check ${x.done ? "on" : ""}" style="${C("mind")};border:0;background:none;padding:2px 0" data-act="li-tick" data-l="${l.id}" data-v="${x.id}" aria-pressed="${!!x.done}"><span class="box">${x.done ? "✓" : ""}</span><span class="nm">${esc(x.t)}</span></button><button type="button" class="x" data-act="li-del" data-l="${l.id}" data-v="${x.id}" aria-label="Remove ${esc(x.t)}">×</button></li>`;
-    return `<section class="card"><h3><span class="t"><i class="dot" style="${C("mind")}"></i>${esc(l.name)}</span><span class="small muted">${done.length}/${l.items.length}</span></h3>
+    const item = x => S.editItem === x.id
+      ? `<li><form class="inline" data-form="li-rename" data-l="${l.id}" data-v="${x.id}" style="width:100%"><input id="li-edit" name="t" value="${esc(x.t)}" aria-label="Edit item" required><button type="submit" class="primary">Save</button><button type="button" class="ghost" data-act="li-edit-cancel">Cancel</button></form></li>`
+      : `<li><button type="button" class="check ${x.done ? "on" : ""}" style="${C("mind")};border:0;background:none;padding:2px 0" data-act="li-tick" data-l="${l.id}" data-v="${x.id}" aria-pressed="${!!x.done}"><span class="box">${x.done ? "✓" : ""}</span><span class="nm">${esc(x.t)}</span></button><span class="acts" style="gap:0"><button type="button" class="x" data-act="li-edit" data-v="${x.id}" aria-label="Edit ${esc(x.t)}">✎</button><button type="button" class="x" data-act="li-del" data-l="${l.id}" data-v="${x.id}" aria-label="Remove ${esc(x.t)}">×</button></span></li>`;
+    const title = S.editList === l.id
+      ? `<form class="inline" data-form="list-rename" data-l="${l.id}" style="width:100%"><input id="list-edit" name="t" value="${esc(l.name)}" aria-label="List name" required><button type="submit" class="primary">Save</button><button type="button" class="ghost" data-act="list-edit-cancel">Cancel</button></form>`
+      : `<span class="t"><i class="dot" style="${C("mind")}"></i><button type="button" class="listname" data-act="list-edit" data-l="${l.id}" aria-label="Rename ${esc(l.name)}">${esc(l.name)} <span class="muted small">✎</span></button></span><span class="small muted">${done.length}/${l.items.length}</span>`;
+    return `<section class="card"><h3>${title}</h3>
       ${l.items.length ? `<ul class="list">${open.concat(done).map(item).join("")}</ul>` : `<div class="empty">Empty list. Add the first item below.</div>`}
       <form class="inline" data-form="li-add" data-l="${l.id}"><input id="li-${l.id}" name="t" placeholder="Add an item" aria-label="Add to ${esc(l.name)}" required><button type="submit">Add</button></form>
       <div class="row" style="justify-content:flex-end;gap:6px">${done.length ? `<button type="button" class="ghost" data-act="li-clear" data-l="${l.id}">Clear ticked</button>` : ""}
@@ -1131,6 +1137,10 @@ document.addEventListener("click", e => {
     case "li-del": { const l = m.lists.find(x => x.id === b.dataset.l); if (l){ l.items = l.items.filter(x => x.id !== v); saveMain(); } break; }
     case "li-clear": { const l = m.lists.find(x => x.id === b.dataset.l); if (l){ const n = l.items.filter(x => x.done).length; l.items = l.items.filter(x => !x.done); toast(`Cleared ${plural(n, "ticked item")}.`); saveMain(); } break; }
     case "list-del": S.delList = b.dataset.l; draw(); break;
+    case "list-edit": S.editList = b.dataset.l; draw(); setTimeout(() => { const n = document.getElementById("list-edit"); if (n){ n.focus(); n.select(); } }, 0); break;
+    case "list-edit-cancel": S.editList = null; draw(); break;
+    case "li-edit": S.editItem = v; draw(); setTimeout(() => { const n = document.getElementById("li-edit"); if (n){ n.focus(); n.select(); } }, 0); break;
+    case "li-edit-cancel": S.editItem = null; draw(); break;
     case "list-del-no": S.delList = null; draw(); break;
     case "list-del-yes": m.lists = m.lists.filter(x => x.id !== b.dataset.l); S.delList = null; saveMain(); break;
     case "event-cancel": S.newEvent = false; draw(); break;
@@ -1171,6 +1181,8 @@ document.addEventListener("submit", e => {
     m.offDays = m.offDays || {}; for (let d = a; d <= z; d = addDays(d, 1)) m.offDays[d] = String(fd.get("why") || "Day off");
     const cut = addDays(today(), -120); Object.keys(m.offDays).forEach(d => { if (d < cut) delete m.offDays[d]; });
     S.offForm = false; toast(a === z ? `Day off on ${fmtDate(a)}. Rest well.` : `Days off from ${fmtDate(a)} to ${fmtDate(z)}.`); }
+  else if (k === "list-rename" && t){ const l = (m.lists || []).find(x => x.id === form.dataset.l); if (l) l.name = t.slice(0, 50); S.editList = null; saveMain(); return; }
+  else if (k === "li-rename" && t){ const l = (m.lists || []).find(x => x.id === form.dataset.l), it = l && l.items.find(x => x.id === form.dataset.v); if (it) it.t = t; S.editItem = null; saveMain(); return; }
   else if (k === "list-new" && t){ m.lists = m.lists || []; const id = uidGen(); m.lists.unshift({id, name:t.slice(0, 50), items:[]}); saveMain(); document.getElementById("li-" + id)?.focus(); return; }
   else if (k === "li-add" && t){ const l = (m.lists || []).find(x => x.id === form.dataset.l); if (!l) return; l.items.push({id:uidGen(), t, done:false}); saveMain(); document.getElementById("li-" + l.id)?.focus(); return; }
   else if (k === "opt-rename" && t){ const key = form.dataset.k, i = +form.dataset.i, list = m.mealOptions[key], old = list[i];
