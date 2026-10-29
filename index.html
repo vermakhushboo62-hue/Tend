@@ -286,6 +286,8 @@ const CAT = [
   ["lymph","Lymphatic workout","Sweat Squad","temple",2,10,{stack:"morning",workout:true,slot:{type:"alt",p:1},sub:"Day B"}],
   ["oilface","Oil face massage","Glow Up Lab","temple",1,5,{stack:"morning"}],
   ["nightface","Night face routine","Glow Up Lab","temple",1,5,{stack:"wind"}],
+  ["medAM","Morning medicine","Meds","temple",1,1,{stack:"morning",always:true}],
+  ["medPM","Night medicine","Meds","temple",1,1,{stack:"wind",always:true}],
   ["icedip","Ice face dip","Glow Up Lab","temple",7,5,{bundle:"glow",prep:["Put the ice mask in the fridge",5,2]}],
   ["cleanup","Face clean-up","Glow Up Lab","temple",7,20,{bundle:"glow"}],
   ["hairspa","Hair spa","Glow Up Lab","temple",7,60,{bundle:"glow",prep:["Make distilled water and oil",15,2]}],
@@ -356,6 +358,7 @@ const MOTIVE = {
   bedcovers:"fresh sheets and deeper sleep", curtains:"brighter, dust-free rooms", mattress:"better sleep, fewer allergens", dusting:"easier breathing, less clutter",
   service:"cool air and clean water", festival:"a sparkling home for the celebrations", weeds:"a thriving garden", fert:"bigger, healthier plants",
   crops:"fresh produce from your terrace", spray:"plants safe from pests", gtrim:"a neat, tidy garden", repot:"room for your plants to grow",
+  medAM:"staying well, one dose at a time", medPM:"staying well, one dose at a time",
   movie:"your reward for the week", picnic:"sunshine and fresh air", trip:"memories to keep",
 };
 const motive = t => MOTIVE[t.id] || "one less thing on your mind";
@@ -369,7 +372,7 @@ function defaults(){
   const meals = {}; DAYS.forEach(d => meals[d] = {B:"", L:"", D:""});
   return {cap:4, waterGoal:2500, glass:250, water:{}, meals, slots:{}, over:{}, custom:[], hidden:[], zones:ZONES_DEFAULT.slice(),
     supply:[{t:"Plan the menu for 7 days", w:""},{t:"Veggies + grocery list from the menu", w:""},{t:"Wash and chop veg", w:""},{t:"Cook dals, grains and sauces", w:""}],
-    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, mealOptions:{B:[], L:[], D:[]}, lastMenu:{}, events:[], activeEvent:null, lists:[], timer:null, version:3};
+    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, mealOptions:{B:[], L:[], D:[]}, lastMenu:{}, events:[], activeEvent:null, lists:[], offDays:{}, timer:null, version:3};
 }
 
 /* ================= helpers ================= */
@@ -479,6 +482,8 @@ function slotText(t){
 }
 function nextOcc(t, from = today()){ for (let i = 0; i < 400; i++){ const d = addDays(from, i); if (occurs(t, d)) return d; } return null; }
 // plan for one day: tasks + preps
+// days off: emergencies, festivals, long days out. Only "always" tasks (medicine) stay on.
+const isOff = d => (M().offDays || {})[d] || null;
 function planFor(date){
   const items = [];
   TASKS().forEach(t => {
@@ -491,6 +496,9 @@ function planFor(date){
     if (t.prep && !items.some(x => x.kind === "prep" && x.t.id === id)) items.push({t, kind:"prep", min:t.prep.min, for:date}); });
   const salonPrep = items.filter(x => x.kind === "prep" && x.t.bundle === "salon"); salonPrep.slice(1).forEach(x => items.splice(items.indexOf(x), 1));
   const counted = items.filter(x => x.t.counts).reduce((a, x) => a + x.min, 0), total = items.reduce((a, x) => a + x.min, 0);
+  const off = isOff(date);
+  if (off){ const keep = items.filter(x => x.t.always), skipped = items.filter(x => !x.t.always);
+    return {date, items:keep, skipped, off, counted:keep.filter(x => x.t.counts).reduce((a, x) => a + x.min, 0), total:keep.reduce((a, x) => a + x.min, 0)}; }
   return {date, items, counted, total};
 }
 // spreading: pick a slot for each task so the heaviest day stays as light as possible
@@ -543,7 +551,7 @@ function carried(){ // non-daily tasks from the last 6 days that never got done
   const out = [], t0 = today(), since = M().startedOn || t0;
   TASKS().filter(t => t.freq >= 3 && !t.stack).forEach(t => {
     for (let k = 1; k <= Math.min(6, t.freq - 1); k++){ const d = addDays(t0, -k); if (d < since) break;
-      if (occEff(t, d)){ if (!LOGS().some(l => l.task === t.id && l.date >= d)) out.push({t, from:d}); break; } } });
+      if (occEff(t, d)){ if (isOff(d)) break; if (!LOGS().some(l => l.task === t.id && l.date >= d)) out.push({t, from:d}); break; } } });
   return out;
 }
 
@@ -636,7 +644,8 @@ function capCard(p){
 }
 function viewToday(){
   const date = today(), p = planFor(date), groups = {}, also = [], showDaily = !!M().showDaily;
-  p.items.filter(it => showDaily || it.t.freq !== 1).forEach(it => { const st = it.kind === "task" ? it.t.stack : (it.t.prepStack || (it.t.stack && it.t.prep.lead === 0 ? it.t.stack : null));
+  if (p.off) return viewOff(date, p);
+  p.items.filter(it => showDaily || it.t.freq !== 1 || it.t.always).forEach(it => { const st = it.kind === "task" ? it.t.stack : (it.t.prepStack || (it.t.stack && it.t.prep.lead === 0 ? it.t.stack : null));
     if (st) (groups[st] = groups[st] || []).push(it); else also.push(it); });
   const cur = currentStack(groups), carry = carried();
   if (!showDaily) return viewTodaySimple(date, p, groups, also, carry);
@@ -648,8 +657,8 @@ function viewToday(){
       <span class="prog">${done}/${its.length}<span class="meter" style="${C(s.area)}"><i style="width:${done / its.length * 100}%"></i></span>${open ? "▴" : "▾"}</span></button>
       ${open ? `<div class="body">${s.why ? `<div class="small muted">${s.why}</div>` : ""}<div class="checks">${its.map(it => it.from ? moveRow(it, date) : checkItem(it, date)).join("")}</div></div>` : ""}</section>`; }).join("");
   return `${head(new Date().toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long"}), M().showDaily ? "Your routines in the order you do them. The one for right now is open; tap any other to open it." : "Only the tasks that change from day to day. Daily routines are hidden; switch them back on in Plan.",
-      `<button type="button" class="primary" data-act="log" data-v="">Log something else</button>`)}
-    <div class="stack">${timerCard()}${goalWalk(...walkCounts(Object.values(groups).flat().concat(also), date))}${capCard(p)}
+      `<div class="row" style="gap:6px"><button type="button" data-act="off-form">Day off</button><button type="button" class="primary" data-act="log" data-v="">Log something else</button></div>`)}
+    <div class="stack">${offForm()}${timerCard()}${goalWalk(...walkCounts(Object.values(groups).flat().concat(also), date))}${capCard(p)}
     <div class="grid">
       <div class="stack">${stacks || `<div class="empty">Nothing planned today.</div>`}</div>
       <div class="stack">
@@ -698,8 +707,8 @@ function viewTodaySimple(date, p, groups, also, carry){
   const done = list.filter(isDone).length, mins = list.reduce((a, x) => a + x.min, 0);
   const row = it => { const html = it.from || (!it.t.stack && it.kind === "task") ? moveRow(it, date) : checkItem(it, date); return html; };
   return `${head(new Date().toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long"}), "Only what changes from day to day. Your daily routines are hidden; switch them back on in Plan if you miss them.",
-      `<button type="button" class="primary" data-act="log" data-v="">Log something else</button>`)}
-    <div class="stack">${timerCard()}${goalWalk(...walkCounts(list, date))}
+      `<div class="row" style="gap:6px"><button type="button" data-act="off-form">Day off</button><button type="button" class="primary" data-act="log" data-v="">Log something else</button></div>`)}
+    <div class="stack">${offForm()}${timerCard()}${goalWalk(...walkCounts(list, date))}
     <div class="grid">
       <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Today's list</span><span class="prog">${done}/${list.length} · ${fmtMin(mins)}<span class="meter" style="${C("temple")}"><i style="width:${list.length ? done / list.length * 100 : 0}%"></i></span></span></h3>
         ${list.length ? `<div class="checks">${list.map(row).join("")}</div>` : `<div class="empty">Nothing extra today. A free day.</div>`}
@@ -712,10 +721,38 @@ function viewTodaySimple(date, p, groups, also, carry){
       </div>
     </div></div>`;
 }
+const OFF_REASONS = ["Festival","Emergency","Long day out","Travel","Unwell","Just need a break"];
+function offForm(){
+  if (!S.offForm) return "";
+  return `<section class="card" style="${C("play")}"><h3><span class="t"><i class="dot"></i>Switch Tend off</span><button type="button" class="ghost" data-act="off-cancel">Cancel</button></h3>
+    <p class="small muted" style="margin:0">Nothing is due on these days, nothing piles up afterwards, and your streaks stay safe. Medicines still show.</p>
+    <form class="stack" data-form="off" style="gap:10px">
+      <label class="field" for="off-why">Why<select id="off-why" name="why">${OFF_REASONS.map(r => `<option>${r}</option>`).join("")}</select></label>
+      <div class="two"><label class="field" for="off-from">From<input id="off-from" name="from" type="date" value="${today()}" required></label>
+      <label class="field" for="off-to">Until<input id="off-to" name="to" type="date" value="${today()}" required></label></div>
+      <div><button type="submit" class="primary">Switch off</button></div></form></section>`;
+}
+function offRange(date){ let a = date, b = date; while (isOff(addDays(a, -1)) === isOff(date)) a = addDays(a, -1); while (isOff(addDays(b, 1)) === isOff(date)) b = addDays(b, 1); return [a, b]; }
+function viewOff(date, p){
+  const [, until] = offRange(date), later = p.skipped.filter(x => x.kind === "task" && x.t.freq >= 3);
+  return `${head(new Date().toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long"}), "Tend is switched off. Look after what matters today.")}
+  <div class="stack">
+  <section class="card" style="${C("play")}"><div class="row between"><div><div class="big" style="font-size:24px">Day off · ${esc(p.off)}</div>
+    <div class="small muted">${until === date ? "Just today" : "Until " + fmtDate(until)}. Nothing is due, nothing piles up, and your streaks are safe.</div></div>
+    <button type="button" data-act="off-end">Switch Tend back on today</button></div></section>
+  <div class="grid">
+    ${p.items.length ? `<section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Still on today</span></h3><div class="checks">${p.items.map(it => checkItem(it, date)).join("")}</div></section>` : ""}
+    ${hiddenArea("temple") ? "" : waterCard()}
+    ${later.length ? `<section class="card"><h3><span class="t"><i class="dot" style="${C("mind")}"></i>Skipped today</span></h3>
+      <p class="small muted" style="margin:0">These simply come round again on their next date. Move one if it really can't wait.</p>
+      <ul class="list">${later.map(x => `<li><span class="lbl"><b>${esc(x.t.label)}</b><span class="small muted">${x.min} min</span></span><button type="button" class="ghost" data-act="off-move" data-v="${x.t.id}" data-from="${x.from || date}">Do it on ${fmtDate(addDays(until, 1))}</button></li>`).join("")}</ul></section>` : ""}
+  </div></div>`;
+}
 function viewWeek(){
   const cap = M().cap * 60, days = Array.from({length:7}, (_, i) => planFor(addDays(today(), i)));
   const rows = days.map((p, i) => { const extras = p.items.filter(x => x.t.freq >= 3 && x.t.id !== "zone");
     const pct = Math.min(100, p.counted / (cap * 1.5) * 100), mark = cap / (cap * 1.5) * 100;
+    if (p.off) return `<div class="dayrow ${i === 0 ? "today" : ""}"><div class="dn"><b>${i === 0 ? "Today" : DAYS[wd(p.date)]}</b><span>${fmtDate(p.date)}</span></div><div><span class="chip" style="${C("play")}"><i class="dot"></i>Day off · ${esc(p.off)}</span></div></div>`;
     return `<div class="dayrow ${i === 0 ? "today" : ""}"><div class="dn"><b>${i === 0 ? "Today" : DAYS[wd(p.date)]}</b><span>${fmtDate(p.date)}</span></div>
       <div><div class="loadline"><span class="loadtrack"><i class="${p.counted > cap ? "over" : ""}" style="width:${pct}%"></i><b style="left:${mark}%"></b></span><span class="num">${fmtMin(p.counted)}${p.counted > cap ? " · over" : ""}</span></div>
       <div class="chips">${extras.length ? extras.map(x => `<span class="chip" style="${C(x.t.area)}"><i class="dot"></i>${x.kind === "prep" ? "Prep: " + esc(x.t.prep.label) : esc(x.t.label)} · ${x.min}m</span>`).join("") : `<span class="small muted">Only your daily routines</span>`}
@@ -761,6 +798,7 @@ function viewPlan(){
         <div class="field">Cleaning zones (Mon & Thu, Tue & Fri, Wed & Sat)${[0,1,2].map(i => `<input id="zone-${i}" data-field="zone" data-i="${i}" value="${esc((m.zones || ZONES_DEFAULT)[i])}" aria-label="Zone ${i + 1}">`).join("")}</div>
         <button type="button" class="switch" role="switch" style="${C("temple")}" aria-checked="${showDaily}" data-act="show-daily"><span>Show daily routines on Today<br><span class="sub">${showDaily ? "Shown as checklists in your routines" : `Hidden. ${dailies.length} daily tasks still count toward your day's time.`}</span></span><span class="knob"></span></button>
         ${window.TEND_STANDALONE ? `<div class="field">Backup (your data lives only on this device)<div class="row"><button type="button" data-act="backup">Download a backup</button><label class="btn" for="restore-file" style="cursor:pointer">Restore from a backup</label><input id="restore-file" type="file" accept="application/json,.json" hidden></div>${S.pendingRestore ? `<div class="empty" style="border-color:var(--over)"><b style="color:var(--fg)">Replace everything on this device with the backup from ${esc(S.pendingRestore.when)}?</b><div class="row"><button type="button" class="primary" data-act="restore-yes">Replace my data</button><button type="button" class="ghost" data-act="restore-no">Cancel</button></div></div>` : ""}</div>` : ""}
+        ${Object.keys(m.offDays || {}).filter(d => d >= today()).length ? `<div class="field">Days off coming up<ul class="list">${Object.keys(m.offDays).filter(d => d >= today()).sort().map(d => `<li><span class="lbl"><b>${fmtDate(d)}</b><span class="small muted">${esc(m.offDays[d])}</span></span><button type="button" class="x" data-act="off-del" data-v="${d}" aria-label="Remove day off on ${fmtDate(d)}">×</button></li>`).join("")}</ul></div>` : ""}
         <div class="row"><button type="button" data-act="respread">Re-spread my year</button><span class="small muted">Finds new spots for everything that isn't fixed to a weekday.</span></div></section>
       <section class="card"><h3><span class="t"><i class="dot" style="${C("mind")}"></i>Add a task</span></h3>
         <form class="stack" data-form="custom" style="gap:10px">
@@ -822,13 +860,14 @@ function viewKitchen(){
 }
 
 /* ================= daily routines tab ================= */
-function streak(id){ let n = 0, d = doneOn(id, today()) ? today() : addDays(today(), -1); while (doneOn(id, d)){ n++; d = addDays(d, -1); } return n; }
+function streak(id){ let n = 0, d = doneOn(id, today()) ? today() : addDays(today(), -1);
+  for (let guard = 0; guard < 400; guard++){ if (isOff(d) && !doneOn(id, d)){ d = addDays(d, -1); continue; } if (!doneOn(id, d)) break; n++; d = addDays(d, -1); } return n; }
 function viewDaily(){
-  const date = today(), items = planFor(date).items.filter(it => it.t.freq === 1), groups = {};
+  const date = today(), pd = planFor(date), items = (pd.off ? pd.items.concat(pd.skipped) : pd.items).filter(it => it.t.freq === 1), groups = {};
   items.forEach(it => { const st = it.t.stack || "home"; (groups[st] = groups[st] || []).push(it); });
   const done = items.filter(it => doneOn(it.kind === "prep" ? it.t.id + ":prep" : it.t.id, date)).length, dates = lastNDates(7);
   const tasks = TASKS().filter(t => t.freq === 1);
-  return `${head("Daily", "Your everyday routines in one place, kept off Today so it stays short. Tick them here for a while and see how they feel.")}
+  return `${head("Daily", pd.off ? `Day off · ${esc(pd.off)}. Nothing here is expected today; tick anything you still do.` : "Your everyday routines in one place, kept off Today so it stays short. Tick them here for a while and see how they feel.")}
   <div class="stack">
   <section class="card"><div class="row between"><b>Today</b><span class="prog">${done}/${items.length}<span class="meter" style="${C("temple")}"><i style="width:${items.length ? done / items.length * 100 : 0}%"></i></span></span></div></section>
   <div class="grid">${STACKS.filter(s => (groups[s.id] || []).length && !hiddenArea(s.area)).map(s => `<section class="card" style="${C(s.area)}"><h3><span class="t"><i class="dot"></i>${s.label}</span><span class="small muted">${groups[s.id].filter(it => doneOn(it.kind === "prep" ? it.t.id + ":prep" : it.t.id, date)).length}/${groups[s.id].length}</span></h3>
@@ -837,9 +876,10 @@ function viewDaily(){
     <form class="stack" data-form="daily-add" style="gap:10px">
       <label class="field" for="da-label">Task<input id="da-label" name="label" placeholder="e.g. Vitamins, 10 min stretch, Water the tulsi" required></label>
       <div class="two"><label class="field" for="da-stack">Part of the day<select id="da-stack" name="stack">${STACKS.map(st => `<option value="${st.id}" ${st.id === "morning" ? "selected" : ""}>${st.label}</option>`).join("")}</select></label>
-      <label class="field" for="da-min">Minutes<input id="da-min" name="min" type="number" min="1" max="300" value="10" required></label></div>
+      <label class="field" for="da-min">Minutes (optional)<input id="da-min" name="min" type="number" min="1" max="300" value="5" inputmode="numeric"></label></div>
+      <label class="row small" for="da-always" style="gap:8px;font-weight:700"><input id="da-always" name="always" type="checkbox"> Also show on Today and keep it on during days off (good for medicines)</label>
       <div><button type="submit" class="primary">Add to Daily</button></div></form>
-    ${(M().custom || []).filter(c => c.freq === 1).length ? `<ul class="list">${M().custom.filter(c => c.freq === 1).map(c => `<li><span class="lbl"><b>${esc(c.label)}</b><span class="small muted">${(STACKS.find(st => st.id === c.stack) || {label:"Home today"}).label} · ${c.min} min</span></span><button type="button" class="x" data-act="custom-del" data-v="${c.id}" aria-label="Remove ${esc(c.label)}">×</button></li>`).join("")}</ul>` : ""}</section>
+    ${(M().custom || []).filter(c => c.freq === 1).length ? `<ul class="list">${M().custom.filter(c => c.freq === 1).map(c => `<li><span class="lbl"><b>${esc(c.label)}</b><span class="small muted">${(STACKS.find(st => st.id === c.stack) || {label:"Home today"}).label} · ${c.min} min${c.always ? " · also on Today" : ""}</span></span><button type="button" class="x" data-act="custom-del" data-v="${c.id}" aria-label="Remove ${esc(c.label)}">×</button></li>`).join("")}</ul>` : ""}</section>
   <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Last 7 days</span><span class="small muted">filled = done</span></h3>
     <div class="scroll"><div class="daygrid"><span></span>${dates.map(d => `<span class="h">${DAYS[wd(d)][0]}</span>`).join("")}
     ${tasks.map(t => `<span class="nm" title="${esc(t.label)}">${esc(t.label)}${streak(t.id) > 1 ? ` <span class="muted">· ${streak(t.id)} in a row</span>` : ""}</span>${dates.map(d => `<span class="cell ${doneOn(t.id, d) ? "on" : ""}" style="${C(t.area)}" title="${esc(t.label)} · ${fmtDate(d)}"></span>`).join("")}`).join("")}</div></div></section>
@@ -928,9 +968,9 @@ function stats(days){
   const total = Object.values(byArea).reduce((a, b) => a + b, 0);
   const counted = dates.map(d => logs.filter(l => l.date === d && task(l.task.replace(/:prep$/, "")).counts).reduce((a, l) => a + (+l.min || 0), 0));
   const workouts = TASKS().filter(t => t.workout);
-  let wPlan = 0, wDone = 0; dates.forEach(d => workouts.forEach(t => { if (occurs(t, d)){ wPlan++; if (doneOn(t.id, d)) wDone++; } }));
+  let wPlan = 0, wDone = 0; dates.forEach(d => workouts.forEach(t => { if (occurs(t, d) && !isOff(d)){ wPlan++; if (doneOn(t.id, d)) wDone++; } }));
   const wDays = dates.filter(d => workouts.some(t => doneOn(t.id, d))).length;
-  const routine = TASKS().filter(t => t.stack && t.freq <= 2 && (M().showDaily || t.freq !== 1)).map(t => { const planned = dates.filter(d => occurs(t, d)); return {t, pct: planned.length ? Math.round(planned.filter(d => doneOn(t.id, d)).length / planned.length * 100) : 0}; });
+  const routine = TASKS().filter(t => t.stack && t.freq <= 2 && (M().showDaily || t.freq !== 1)).map(t => { const planned = dates.filter(d => occurs(t, d) && !isOff(d)); return {t, pct: planned.length ? Math.round(planned.filter(d => doneOn(t.id, d)).length / planned.length * 100) : 0}; });
   const waterDays = dates.filter(d => water(d) >= M().waterGoal).length;
   const overCap = counted.filter(v => v > M().cap * 60).length;
   return {days, logs, total, byArea, byTask, byPart, wPlan, wDone, wDays, routine, waterDays, overCap, avgCounted:counted.reduce((a, b) => a + b, 0) / days};
@@ -1051,6 +1091,11 @@ document.addEventListener("click", e => {
       const cut = addDays(d, -100); Object.keys(m.water).forEach(k => { if (k < cut) delete m.water[k]; }); saveMain(); break; }
     case "wday": S.weekDay = +v; draw(); break;
     case "pickday": S.pickDay = +v; draw(); break;
+    case "off-form": S.offForm = true; draw(); break;
+    case "off-cancel": S.offForm = false; draw(); break;
+    case "off-end": { const [a, bEnd] = offRange(today()); m.offDays = m.offDays || {}; for (let d = today(); d <= bEnd; d = addDays(d, 1)) delete m.offDays[d]; toast("Tend is back on. Today's list is ready."); saveMain(); break; }
+    case "off-del": delete m.offDays[v]; saveMain(); break;
+    case "off-move": { const [, until] = offRange(today()); m.moves = m.moves || {}; m.moves[mvKey(v, b.dataset.from)] = addDays(until, 1); toast(`${task(v).label} moved to ${fmtDate(addDays(until, 1))}.`); saveMain(); break; }
     case "theme": { const order = ["auto","light","dark"], cur = getTheme(); setTheme(order[(order.indexOf(cur) + 1) % 3]); break; }
     case "backup": { const blob = new Blob([JSON.stringify({app:"tend", version:3, saved:new Date().toISOString(), main:S.main, logs:S.logs})], {type:"application/json"});
       const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `tend-backup-${today()}.json`; document.body.appendChild(a); a.click(); a.remove();
@@ -1121,6 +1166,11 @@ document.addEventListener("submit", e => {
   const form = e.target, k = form.dataset.form; if (!k) return; e.preventDefault();
   const fd = new FormData(form), t = String(fd.get("t") || "").trim().slice(0, 80), m = M();
   if (k === "supply" && t) m.supply.push({t, w:""});
+  else if (k === "off"){ let a = String(fd.get("from")), z = String(fd.get("to") || a); if (!a) return; if (z < a) [a, z] = [z, a];
+    if (diffDays(z, a) > 60){ toast("That's more than two months. Pick a shorter stretch, or pause an area in Plan instead."); return; }
+    m.offDays = m.offDays || {}; for (let d = a; d <= z; d = addDays(d, 1)) m.offDays[d] = String(fd.get("why") || "Day off");
+    const cut = addDays(today(), -120); Object.keys(m.offDays).forEach(d => { if (d < cut) delete m.offDays[d]; });
+    S.offForm = false; toast(a === z ? `Day off on ${fmtDate(a)}. Rest well.` : `Days off from ${fmtDate(a)} to ${fmtDate(z)}.`); }
   else if (k === "list-new" && t){ m.lists = m.lists || []; const id = uidGen(); m.lists.unshift({id, name:t.slice(0, 50), items:[]}); saveMain(); document.getElementById("li-" + id)?.focus(); return; }
   else if (k === "li-add" && t){ const l = (m.lists || []).find(x => x.id === form.dataset.l); if (!l) return; l.items.push({id:uidGen(), t, done:false}); saveMain(); document.getElementById("li-" + l.id)?.focus(); return; }
   else if (k === "opt-rename" && t){ const key = form.dataset.k, i = +form.dataset.i, list = m.mealOptions[key], old = list[i];
@@ -1129,7 +1179,7 @@ document.addEventListener("submit", e => {
     S.editOpt = null; toast(n ? `Renamed. Updated ${n} day${n === 1 ? "" : "s"} in this week's menu.` : "Renamed."); }
   else if (k === "daily-add"){ const label = String(fd.get("label") || "").trim().slice(0, 60); if (!label) return;
     const st = STACKS.find(x => x.id === fd.get("stack")) || STACKS[0];
-    m.custom = m.custom || []; fresh(); m.custom.push({id:"c" + uidGen(), label, area:st.area, stack:st.id, freq:1, min:Math.max(1, +fd.get("min") || 10)});
+    m.custom = m.custom || []; fresh(); m.custom.push({id:"c" + uidGen(), label, area:st.area, stack:st.id, freq:1, min:Math.max(1, +fd.get("min") || 5), always:!!fd.get("always")});
     toast(`Added ${label} to ${st.label}.`); }
   else if (k === "opt" && t){ const key = form.dataset.k; m.mealOptions = m.mealOptions || {B:[], L:[], D:[]};
     const list = m.mealOptions[key], add = String(fd.get("t")).split(",").map(x => x.trim().slice(0, 60)).filter(x => x && !list.some(y => y.toLowerCase() === x.toLowerCase()));
