@@ -190,7 +190,7 @@ button.listname{border:0;background:none;padding:0;font:inherit;font-family:var(
 .day[aria-pressed="true"]{outline:2px solid var(--fg);outline-offset:1px}
 .legend{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);flex-wrap:wrap}
 .legend i{width:16px;height:12px;border-radius:3px;display:inline-block}
-.prow{display:grid;grid-template-columns:minmax(0,1fr) 150px 86px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.prow{display:grid;grid-template-columns:minmax(0,1fr) 150px 124px;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
 .prow:first-child{border-top:0}
 .prow .lbl span{font-size:12.5px;color:var(--muted)}
 .prow select,.prow input{font-size:13px;padding:5px 7px;width:100%}
@@ -245,7 +245,7 @@ form.inline input{flex:1 1 140px}
 @media (prefers-reduced-motion: no-preference){ .meter i,.bar .track i,.loadtrack i{transition:width .3s ease} }
 @media (max-width:560px){
   .brand h1{font-size:30px}
-  .prow{grid-template-columns:1fr 84px}
+  .prow{grid-template-columns:minmax(0,1fr) 124px}
   .prow .lbl{grid-column:1/-1}
   .dayrow{grid-template-columns:1fr}
   .day{min-height:44px;padding:4px 3px} .day .m{font-size:11px}
@@ -320,7 +320,7 @@ const CAT = [
   ["restock","Groceries and household restock","Supply Run","kitchen",7,45,{slot:{type:"days",d:[5]},sub:"Saturday, same trip"}],
   ["foodprep","Food prep after shopping","Supply Run","kitchen",7,80,{slot:{type:"days",d:[5]},sub:"Saturday, after shopping"}],
   ["fridge","Fridge clear-out","Supply Run","kitchen",14,20],
-  ["zone","Clean today's zone","Sparkle Squad","home",1,45,{stack:"home",slot:{type:"days",d:[0,1,2,3,4,5]},sub:"5 spaces a day, Sunday off"}],
+  ["zone","Clean today's spaces","Sparkle Squad","home",1,30,{stack:"home",slot:{type:"days",d:[0,1,2,3,4,5]},sub:"2-week rotation, Sunday off"}],
   ["trash","Trash and recycling","Sparkle Squad","home",1,5,{stack:"home"}],
   ["washdeep","Washroom deep clean","Sparkle Squad","home",7,60,{slot:{type:"days",d:[2]},sub:"Wednesday, the washroom zone day"}],
   ["plants","Plant care","Green Thumb Club","garden",1,20,{stack:"home"}],
@@ -364,6 +364,10 @@ const MOTIVE = {
 };
 const motive = t => MOTIVE[t.id] || "one less thing on your mind";
 const ZONES_DEFAULT = ["Kitchen, dining room, hall and 2 balconies", "All 4 rooms and the terrace", "3 washrooms and 2 balconies"];
+// two weeks, Monday to Saturday: every space comes round once a fortnight (kitchen twice), Sunday off
+const ROTATION_DEFAULT = [
+  "Kitchen", "Bedroom", "Washrooms 1 and 2", "Hall", "Guest room", "Balconies 1 and 2",
+  "Kitchen and dining room", "Lounge", "Washroom 3", "Dining room and entrance", "Fourth room", "Balconies 3 and 4, terrace"];
 const FREQS = [[1,"Daily"],[2,"Alternate days"],[3,"Every 3 days"],[7,"Weekly"],[14,"Every 2 weeks"],[15,"Every 15 days"],[30,"Monthly"],[60,"Every 2 months"],[91,"Every 3 months"],[182,"Every 6 months"],[365,"Yearly"]];
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const START = "2026-11-02", H = 364;
@@ -412,10 +416,17 @@ function buildAll(){
     x.counts = t.counts ?? AREAS[t.area].counts;
     if (x.freq !== t.freq){ delete x.slot; delete x.bundle; if (x.stack && x.freq > 2) delete x.stack; }
     if (x.prep && o.prepMin !== undefined) x.prep = {...x.prep, min:o.prepMin};
+    if (o.label) x.label = o.label;
+    if (o.stack !== undefined) x.stack = o.stack || undefined;
+    if (o.always !== undefined) x.always = o.always;
+    if (o.prep !== undefined) x.prep = o.prep ? {...o.prep} : null;
+    // up to weekly: these exact days. Longer cycles: the weekday it should land on, Tend still picks which week
+    if (o.days && o.days.length){ delete x.bundle; if (x.freq <= 7) x.slot = {type:"days", d:o.days.slice().sort()}; else { delete x.slot; x.prefDays = o.days.slice(); } }
+    x.off = !!o.off;
     return x; });
 }
 const hiddenArea = a => (M().hidden || []).includes(a);
-const TASKS = () => ALL().filter(t => !hiddenArea(t.area));
+const TASKS = () => ALL().filter(t => !hiddenArea(t.area) && !t.off);
 const task = id => ALL().find(t => t.id === id) || {id, label:id.replace(/:prep$/, " prep"), area:"home", min:0, theme:""};
 
 const LS_KEY = "tend.v3";
@@ -504,11 +515,11 @@ function planFor(date){
 }
 // spreading: pick a slot for each task so the heaviest day stays as light as possible
 function candidates(t){
-  const type = defaultType(t.freq), out = [];
+  const type = defaultType(t.freq), out = [], pref = t.prefDays && t.prefDays.length ? t.prefDays : null;
   if (type === "alt") [0,1].forEach(p => out.push({type, p}));
-  else if (type === "days") (t.weekend ? [5,6] : [0,1,2,3,4,5,6]).forEach(i => out.push({type, d:[i]}));
-  else if (type === "every") for (let o = 0; o < t.freq; o++) out.push({type, n:t.freq, o});
-  else if (type === "monthly"){ const k = Math.max(1, Math.round(t.freq / 30.4)); for (let mo = 0; mo < k; mo++) for (let nth = 1; nth <= 4; nth++) (t.weekend ? [5,6] : [0,1,2,3,4,5,6]).forEach(w => out.push({type, k, mo, nth, w})); }
+  else if (type === "days") (pref || (t.weekend ? [5,6] : [0,1,2,3,4,5,6])).forEach(i => out.push({type, d:[i]}));
+  else if (type === "every") for (let o = 0; o < t.freq; o++){ if (!pref || pref.includes(o % 7)) out.push({type, n:t.freq, o}); }
+  else if (type === "monthly"){ const k = Math.max(1, Math.round(t.freq / 30.4)); for (let mo = 0; mo < k; mo++) for (let nth = 1; nth <= 4; nth++) (pref || (t.weekend ? [5,6] : [0,1,2,3,4,5,6])).forEach(w => out.push({type, k, mo, nth, w})); }
   return out;
 }
 function respread(all){
@@ -547,7 +558,9 @@ function lastDone(id){ let b = null; for (const l of LOGS()) if (l.task === id &
 function inRange(days){ const from = addDays(today(), -(days - 1)); return LOGS().filter(l => l.date >= from && l.date <= today()); }
 function lastNDates(n){ return Array.from({length:n}, (_, i) => addDays(today(), i - n + 1)); }
 function water(date){ return (M().water || {})[date] || 0; }
-function zoneFor(date){ const s = wd(date); if (s === 6) return null; return {n:s % 3, text:(M().zones || ZONES_DEFAULT)[s % 3]}; }
+const rotWeek = date => mod(Math.floor(diffDays(date, START) / 7), 2);
+function zoneFor(date){ const s = wd(date); if (s === 6) return null; const i = rotWeek(date) * 6 + s, text = ((M().rotation || ROTATION_DEFAULT)[i] || "").trim();
+  return text ? {n:i, text} : null; }
 function carried(){ // non-daily tasks from the last 6 days that never got done
   const out = [], t0 = today(), since = M().startedOn || t0;
   TASKS().filter(t => t.freq >= 3 && !t.stack).forEach(t => {
@@ -779,10 +792,11 @@ function viewPlan(){
   const themes = THEMES.concat(m.custom && m.custom.length ? ["Your own"] : []).map(th => { const xs = all.filter(t => t.theme === th && (showDaily || t.freq !== 1)); if (!xs.length) return "";
     return `<div class="theme" style="${C(xs[0].area)}"><h4>${th}</h4>${xs.map(planRow).join("")}</div>`; }).join("")
     + (showDaily || !dailies.length ? "" : `<details class="theme"><summary><b>Daily routines, hidden</b> <span class="small muted">${dailies.length} tasks · change one to a longer cycle to bring it back</span></summary>${dailies.map(planRow).join("")}</details>`);
-  function planRow(t){ return `<div class="prow"><span class="lbl"><b>${esc(t.label)}</b><span>${esc(slotText(t))}${t.counts ? "" : " · outside the limit"}${t.prep ? ` · prep: ${esc(t.prep.label)}` : ""}</span></span>
+  function planRow(t){ if (S.editTask === t.id) return taskEditor(t); return `<div class="prow"><span class="lbl"><b>${esc(t.label)}</b><span>${esc(slotText(t))}${t.counts ? "" : " · outside the limit"}${t.prep ? ` · prep: ${esc(t.prep.label)}` : ""}</span></span>
       <select id="fq-${t.id}" data-field="freq" data-id="${t.id}" aria-label="How often: ${esc(t.label)}">${FREQS.concat(FREQS.some(f => f[0] === t.freq) ? [] : [[t.freq, `Every ${t.freq} days`]]).map(([v, l]) => `<option value="${v}" ${t.freq === v ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <span class="row" style="gap:4px;flex-wrap:nowrap"><span class="minwrap"><input id="mn-${t.id}" type="number" min="0" max="600" value="${t.min}" data-field="min" data-id="${t.id}" aria-label="Minutes for ${esc(t.label)}"><span>min</span></span>${t.custom ? `<button type="button" class="x" data-act="custom-del" data-v="${t.id}" aria-label="Remove ${esc(t.label)}">×</button>` : ""}</span></div>`; }
-  return `${head("Plan", "Every task with its spot in the calendar. Change how often or how long, and Tend finds a new spot that keeps your days light.")}
+      <span class="row" style="gap:4px;flex-wrap:nowrap"><span class="minwrap"><input id="mn-${t.id}" type="number" min="0" max="600" value="${t.min}" data-field="min" data-id="${t.id}" aria-label="Minutes for ${esc(t.label)}"><span>min</span></span><button type="button" class="x" data-act="task-edit" data-v="${t.id}" aria-label="Edit ${esc(t.label)}" title="Edit">✎</button></span></div>`; }
+  const offTasks = ALL().filter(t => t.off);
+  return `${head("Plan", "Every task with its spot in the calendar. Change anything here and Tend finds new spots that keep your days light.")}
   <div class="stack">
   <div class="tiles">
     <div class="tile"><span class="k">Counted per day</span><span class="big num">${fmtMin(avg.c)}</span><span class="small muted">average, limit ${m.cap} h</span></div>
@@ -791,12 +805,14 @@ function viewPlan(){
     <div class="tile"><span class="k">Everything a day</span><span class="big num">${fmtMin(avg.t)}</span><span class="small muted">incl. projects, meals, fun</span></div>
   </div>
   <div class="grid wide">
-    <section class="card">${themes}</section>
+    <section class="card"><p class="small muted" style="margin:0">Tap ✎ on any task to change its name, how often, minutes, part of the day, fixed days or prep, or to switch it off. Changes show up everywhere straight away.</p>${themes}
+      ${offTasks.length ? `<details class="theme" open><summary><b>Switched off</b> <span class="small muted">${offTasks.length} task${offTasks.length === 1 ? "" : "s"}</span></summary><ul class="list">${offTasks.map(t => `<li><span class="lbl"><b>${esc(t.label)}</b><span class="small muted">${esc(t.theme)}</span></span><button type="button" data-act="task-on" data-v="${t.id}">Switch back on</button></li>`).join("")}</ul></details>` : ""}</section>
     <div class="stack">
       <section class="card"><h3><span class="t"><i class="dot" style="${C("mind")}"></i>Settings</span></h3>
         <label class="field" for="cap">Daily limit for chores and self-care (hours)<input id="cap" type="number" min="1" max="12" step="0.5" value="${m.cap}" data-field="cap"></label>
         <label class="field" for="wgoal">Water goal (ml)<input id="wgoal" type="number" min="500" step="250" value="${m.waterGoal}" data-field="waterGoal"></label>
-        <div class="field">Cleaning zones (Mon & Thu, Tue & Fri, Wed & Sat)${[0,1,2].map(i => `<input id="zone-${i}" data-field="zone" data-i="${i}" value="${esc((m.zones || ZONES_DEFAULT)[i])}" aria-label="Zone ${i + 1}">`).join("")}</div>
+        <div class="field">Cleaning rotation · two weeks, Sunday off<span class="small" style="font-weight:400">This is week ${rotWeek(today()) + 1}. Type the spaces for each day; leave a day empty to skip it.</span>
+          ${[0,1].map(w => `<b class="small" style="margin-top:6px;color:var(--fg)">Week ${w + 1}</b>${[0,1,2,3,4,5].map(d => `<label class="row" style="gap:8px;flex-wrap:nowrap;font-weight:400" for="rot-${w * 6 + d}"><span style="width:34px">${DAYS[d]}</span><input id="rot-${w * 6 + d}" data-field="rot" data-i="${w * 6 + d}" value="${esc((m.rotation || ROTATION_DEFAULT)[w * 6 + d] || "")}" style="flex:1"></label>`).join("")}`).join("")}</div>
         <button type="button" class="switch" role="switch" style="${C("temple")}" aria-checked="${showDaily}" data-act="show-daily"><span>Show daily routines on Today<br><span class="sub">${showDaily ? "Shown as checklists in your routines" : `Hidden. ${dailies.length} daily tasks still count toward your day's time.`}</span></span><span class="knob"></span></button>
         ${window.TEND_STANDALONE ? `<div class="field">Backup (your data lives only on this device)<div class="row"><button type="button" data-act="backup">Download a backup</button><label class="btn" for="restore-file" style="cursor:pointer">Restore from a backup</label><input id="restore-file" type="file" accept="application/json,.json" hidden></div>${S.pendingRestore ? `<div class="empty" style="border-color:var(--over)"><b style="color:var(--fg)">Replace everything on this device with the backup from ${esc(S.pendingRestore.when)}?</b><div class="row"><button type="button" class="primary" data-act="restore-yes">Replace my data</button><button type="button" class="ghost" data-act="restore-no">Cancel</button></div></div>` : ""}</div>` : ""}
         ${Object.keys(m.offDays || {}).filter(d => d >= today()).length ? `<div class="field">Days off coming up<ul class="list">${Object.keys(m.offDays).filter(d => d >= today()).sort().map(d => `<li><span class="lbl"><b>${fmtDate(d)}</b><span class="small muted">${esc(m.offDays[d])}</span></span><button type="button" class="x" data-act="off-del" data-v="${d}" aria-label="Remove day off on ${fmtDate(d)}">×</button></li>`).join("")}</ul></div>` : ""}
@@ -829,6 +845,26 @@ function pickDish(pool, used, last, prev, next){
   const ok = x => x !== prev && x !== next;
   const tiers = [pool.filter(x => !used.has(x) && !last.has(x) && ok(x)), pool.filter(x => !used.has(x) && ok(x)), pool.filter(ok), pool];
   const t = tiers.find(x => x.length); return t[Math.floor(Math.random() * t.length)];
+}
+const PREP_WHEN = [[0,"Same day, just before"],[1,"Night before"],[2,"2 days before"]];
+function taskEditor(t){
+  const days = t.prefDays ? t.prefDays : t.slot && t.slot.type === "days" && t.slot.d.length < 7 ? t.slot.d : [];
+  const stackOpts = [["", "Anytime (Also today)"]].concat(STACKS.map(s => [s.id, s.label]));
+  return `<form class="card" data-form="task-edit" data-id="${t.id}" style="${C(t.area)};margin:8px 0;gap:10px;border-color:var(--c)">
+    <label class="field" for="te-label">Name<input id="te-label" name="label" value="${esc(t.label)}" required></label>
+    <div class="two"><label class="field" for="te-freq">How often<select id="te-freq" name="freq">${FREQS.concat(FREQS.some(f => f[0] === t.freq) ? [] : [[t.freq, `Every ${t.freq} days`]]).map(([v, l]) => `<option value="${v}" ${t.freq === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <label class="field" for="te-min">Minutes<input id="te-min" name="min" type="number" min="0" max="600" value="${t.min}" inputmode="numeric"></label></div>
+    <label class="field" for="te-stack">Part of the day<select id="te-stack" name="stack">${stackOpts.map(([v, l]) => `<option value="${v}" ${(t.stack || "") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+    <div class="field">Days <span class="small" style="font-weight:400">(optional) Weekly or more often: the exact days. Longer cycles: the weekday it lands on. Leave empty and Tend picks the lightest day.</span>
+      <div class="chips" style="margin-top:2px">${DAYS.map((d, i) => `<label class="chip" style="${C(t.area)};cursor:pointer"><input type="checkbox" name="days" value="${i}" ${days.includes(i) ? "checked" : ""}> ${d}</label>`).join("")}</div></div>
+    <div class="field">Prep step <span class="small" style="font-weight:400">(optional)</span>
+      <input id="te-prep" name="prep" value="${esc(t.prep ? t.prep.label : "")}" placeholder="e.g. Soak overnight">
+      <div class="two"><select id="te-plead" name="plead" aria-label="When to prep">${PREP_WHEN.map(([v, l]) => `<option value="${v}" ${t.prep && t.prep.lead === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <span class="minwrap"><input id="te-pmin" name="pmin" type="number" min="1" max="300" value="${t.prep ? t.prep.min : 5}" aria-label="Prep minutes"><span>min</span></span></div></div>
+    <label class="row small" for="te-always" style="gap:8px;font-weight:700"><input id="te-always" name="always" type="checkbox" ${t.always ? "checked" : ""}> Always show on Today and keep it on during days off</label>
+    <div class="row between"><span class="row" style="gap:6px"><button type="submit" class="primary">Save</button><button type="button" class="ghost" data-act="task-edit-cancel">Cancel</button></span>
+      <span class="row" style="gap:6px">${t.custom ? `<button type="button" class="ghost" data-act="custom-del" data-v="${t.id}">Delete task</button>` : `${(M().over || {})[t.id] ? `<button type="button" class="ghost" data-act="task-reset" data-v="${t.id}">Reset to original</button>` : ""}<button type="button" class="ghost" data-act="task-off" data-v="${t.id}">Switch off</button>`}</span></div>
+  </form>`;
 }
 function viewKitchen(){
   const m = M(), td = DAYS[wd(today())], wk = addDays(today(), -wd(today())), opts = m.mealOptions || {B:[], L:[], D:[]};
@@ -1117,7 +1153,12 @@ document.addEventListener("click", e => {
       saveMain(); break; }
     case "respread": respread(true); toast("Re-spread your year."); saveMain(); break;
     case "area-toggle": { m.hidden = m.hidden || []; const on = m.hidden.includes(v); m.hidden = on ? m.hidden.filter(a => a !== v) : m.hidden.concat(v); saveMain(); break; }
-    case "custom-del": m.custom = m.custom.filter(c => c.id !== v); delete m.slots[v]; saveMain(); break;
+    case "custom-del": m.custom = m.custom.filter(c => c.id !== v); delete m.slots[v]; if (m.over) delete m.over[v]; S.editTask = null; saveMain(); break;
+    case "task-edit": S.editTask = v; draw(); setTimeout(() => document.getElementById("te-label")?.focus(), 0); break;
+    case "task-edit-cancel": S.editTask = null; draw(); break;
+    case "task-off": { m.over = m.over || {}; m.over[v] = {...(m.over[v] || {}), off:true}; S.editTask = null; toast(`${task(v).label} switched off. Find it under Switched off to bring it back.`); saveMain(); break; }
+    case "task-on": { const o = (m.over || {})[v]; if (o){ delete o.off; if (!Object.keys(o).length) delete m.over[v]; } fresh(); respread(false); toast(`${task(v).label} is back on.`); saveMain(); break; }
+    case "task-reset": { const t0 = task(v); delete m.over[v]; delete m.slots[v]; if (t0.bundle) delete m.slots["b:" + t0.bundle]; fresh(); respread(false); S.editTask = null; toast("Back to the original."); saveMain(); break; }
     case "supply-toggle": { const it = m.supply[+v], wk = addDays(today(), -wd(today())); it.w = it.w === wk ? "" : wk; saveMain(); break; }
     case "supply-del": m.supply.splice(+v, 1); saveMain(); break;
     case "opt-del": m.mealOptions[b.dataset.k].splice(+v, 1); S.editOpt = null; saveMain(); break;
@@ -1167,6 +1208,7 @@ document.addEventListener("change", e => {
     fresh(); if (f === "freq"){ const t = task(id); delete m.slots[t.bundle && bundleOk(t) ? "b:" + t.bundle : id]; delete m.slots[id]; respread(false); toast(`${t.label}: ${slotText(t).toLowerCase()}.`); } }
   else if (f === "cap") m.cap = Math.min(12, Math.max(1, +el.value || 4));
   else if (f === "waterGoal") m.waterGoal = Math.max(250, +el.value || 2500);
+  else if (f === "rot"){ m.rotation = (m.rotation || ROTATION_DEFAULT).slice(); m.rotation[+el.dataset.i] = el.value.slice(0, 120); }
   else if (f === "zone"){ m.zones = (m.zones || ZONES_DEFAULT).slice(); m.zones[+el.dataset.i] = el.value.slice(0, 120); }
   else if (f === "tour") m.tours[+el.dataset.i].s = el.value;
   else return;
@@ -1181,6 +1223,17 @@ document.addEventListener("submit", e => {
     m.offDays = m.offDays || {}; for (let d = a; d <= z; d = addDays(d, 1)) m.offDays[d] = String(fd.get("why") || "Day off");
     const cut = addDays(today(), -120); Object.keys(m.offDays).forEach(d => { if (d < cut) delete m.offDays[d]; });
     S.offForm = false; toast(a === z ? `Day off on ${fmtDate(a)}. Rest well.` : `Days off from ${fmtDate(a)} to ${fmtDate(z)}.`); }
+  else if (k === "task-edit"){ const id = form.dataset.id, before = task(id), label = String(fd.get("label") || "").trim().slice(0, 60); if (!label) return;
+    const freq = +fd.get("freq") || before.freq, days = fd.getAll("days").map(Number), prepLabel = String(fd.get("prep") || "").trim().slice(0, 80);
+    m.over = m.over || {}; const o = {...(m.over[id] || {})};
+    o.label = label; o.freq = freq; o.min = Math.max(0, Math.min(600, +fd.get("min") || 0)); o.stack = String(fd.get("stack") || "");
+    o.days = days.length ? days : undefined; o.always = !!fd.get("always");
+    o.prep = prepLabel ? {label:prepLabel, lead:+fd.get("plead") || 0, min:Math.max(1, +fd.get("pmin") || 5)} : null;
+    delete o.prepMin; Object.keys(o).forEach(key => o[key] === undefined && delete o[key]);
+    const changedWhen = freq !== before.freq || JSON.stringify(days) !== JSON.stringify(o._days || []);
+    o._days = days; m.over[id] = o;
+    if (changedWhen){ delete m.slots[id]; if (before.bundle) delete m.slots["b:" + before.bundle]; }
+    S.editTask = null; fresh(); respread(false); toast(`Saved. ${label}: ${slotText(task(id)).toLowerCase()}.`); }
   else if (k === "list-rename" && t){ const l = (m.lists || []).find(x => x.id === form.dataset.l); if (l) l.name = t.slice(0, 50); S.editList = null; saveMain(); return; }
   else if (k === "li-rename" && t){ const l = (m.lists || []).find(x => x.id === form.dataset.l), it = l && l.items.find(x => x.id === form.dataset.v); if (it) it.t = t; S.editItem = null; saveMain(); return; }
   else if (k === "list-new" && t){ m.lists = m.lists || []; const id = uidGen(); m.lists.unshift({id, name:t.slice(0, 50), items:[]}); saveMain(); document.getElementById("li-" + id)?.focus(); return; }
