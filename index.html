@@ -134,6 +134,8 @@ textarea{width:100%;resize:vertical}
 .daygrid .h{color:var(--muted);text-align:center;font-weight:700}
 .daygrid .cell{height:20px;border-radius:5px;background:var(--sunk)}
 .daygrid .cell.on{background:var(--c,var(--temple))}
+.daygrid button.cell{border:0;padding:0;width:100%;height:26px;cursor:pointer;display:block}
+.daygrid button.cell:not(.on):hover{box-shadow:inset 0 0 0 2px var(--c,var(--temple))}
 .daygrid .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .optcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
 .optcol{display:grid;gap:8px;align-content:start}
@@ -917,9 +919,9 @@ function viewDaily(){
       <label class="row small" for="da-always" style="gap:8px;font-weight:700"><input id="da-always" name="always" type="checkbox"> Also show on Today and keep it on during days off (good for medicines)</label>
       <div><button type="submit" class="primary">Add to Daily</button></div></form>
     ${(M().custom || []).filter(c => c.freq === 1).length ? `<ul class="list">${M().custom.filter(c => c.freq === 1).map(c => `<li><span class="lbl"><b>${esc(c.label)}</b><span class="small muted">${(STACKS.find(st => st.id === c.stack) || {label:"Home today"}).label} · ${c.min} min${c.always ? " · also on Today" : ""}</span></span><button type="button" class="x" data-act="custom-del" data-v="${c.id}" aria-label="Remove ${esc(c.label)}">×</button></li>`).join("")}</ul>` : ""}</section>
-  <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Last 7 days</span><span class="small muted">filled = done</span></h3>
+  <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Last 7 days</span><span class="small muted">tap a square to fill or clear it</span></h3>
     <div class="scroll"><div class="daygrid"><span></span>${dates.map(d => `<span class="h">${DAYS[wd(d)][0]}</span>`).join("")}
-    ${tasks.map(t => `<span class="nm" title="${esc(t.label)}">${esc(t.label)}${streak(t.id) > 1 ? ` <span class="muted">· ${streak(t.id)} in a row</span>` : ""}</span>${dates.map(d => `<span class="cell ${doneOn(t.id, d) ? "on" : ""}" style="${C(t.area)}" title="${esc(t.label)} · ${fmtDate(d)}"></span>`).join("")}`).join("")}</div></div></section>
+    ${tasks.map(t => `<span class="nm" title="${esc(t.label)}">${esc(t.label)}${streak(t.id) > 1 ? ` <span class="muted">· ${streak(t.id)} in a row</span>` : ""}</span>${dates.map(d => `<button type="button" class="cell ${doneOn(t.id, d) ? "on" : ""}" style="${C(t.area)}" data-act="cell" data-v="${t.id}" data-d="${d}" data-min="${t.min}" aria-pressed="${!!doneOn(t.id, d)}" aria-label="${esc(t.label)} on ${fmtDate(d)}: ${doneOn(t.id, d) ? "done" : "not done"}"></button>`).join("")}`).join("")}</div></div></section>
   </div>`;
 }
 
@@ -1133,6 +1135,8 @@ document.addEventListener("click", e => {
       const cut = addDays(d, -100); Object.keys(m.water).forEach(k => { if (k < cut) delete m.water[k]; }); saveMain(); break; }
     case "wday": S.weekDay = +v; draw(); break;
     case "pickday": S.pickDay = +v; draw(); break;
+    case "cell": { const d = b.dataset.d, ex = doneOn(v, d); if (ex) removeLog(ex.id, true);
+      else { addLog({task:v, date:d, min:+b.dataset.min || 0, hour:21, late:true}); toast(`${task(v).label} marked done for ${fmtDate(d)}.`); } break; }
     case "off-form": S.offForm = true; draw(); break;
     case "off-cancel": S.offForm = false; draw(); break;
     case "off-end": { const [a, bEnd] = offRange(today()); m.offDays = m.offDays || {}; for (let d = today(); d <= bEnd; d = addDays(d, 1)) delete m.offDays[d]; toast("Tend is back on. Today's list is ready."); saveMain(); break; }
