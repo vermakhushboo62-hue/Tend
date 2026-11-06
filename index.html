@@ -149,6 +149,17 @@ textarea{width:100%;resize:vertical}
 .picks{display:grid;gap:10px}
 .picks h4{margin:0;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .hostsec .due{font-size:12px;font-weight:700;color:var(--play)}
+.pcal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.pcal .h{font-size:11.5px;color:var(--muted);text-align:center;font-weight:700}
+.pday{border:0;border-radius:50%;aspect-ratio:1;max-width:100%;padding:0;display:grid;place-items:center;font-size:13px;font-weight:400;background:var(--sunk);color:var(--fg)}
+.pday.light{background:color-mix(in srgb,var(--play) 30%,var(--surface))}
+.pday.medium{background:color-mix(in srgb,var(--play) 60%,var(--surface))}
+.pday.heavy{background:var(--play);color:var(--surface);font-weight:700}
+.pday.pred{background:none;box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--play) 60%,transparent)}
+.pday.today{outline:2px solid var(--fg);outline-offset:1px}
+.legend .sw{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--sunk)}
+.legend .sw.light{background:color-mix(in srgb,var(--play) 30%,var(--surface))} .legend .sw.medium{background:color-mix(in srgb,var(--play) 60%,var(--surface))} .legend .sw.heavy{background:var(--play)}
+.legend .sw.pred{background:none;box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--play) 60%,transparent)}
 button.listname{border:0;background:none;padding:0;font:inherit;font-family:var(--display);font-size:17px;font-weight:700;color:var(--fg);white-space:normal;text-align:left}
 .list li .check{width:auto;flex:1 1 0;min-width:0}
 @media (max-width:620px){
@@ -379,7 +390,7 @@ function defaults(){
   const meals = {}; DAYS.forEach(d => meals[d] = {B:"", L:"", D:""});
   return {cap:4, waterGoal:2500, glass:250, water:{}, meals, slots:{}, over:{}, custom:[], hidden:[], zones:ZONES_DEFAULT.slice(),
     supply:[{t:"Plan the menu for 7 days", w:""},{t:"Veggies + grocery list from the menu", w:""},{t:"Wash and chop veg", w:""},{t:"Cook dals, grains and sauces", w:""}],
-    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, mealOptions:{B:[], L:[], D:[]}, lastMenu:{}, events:[], activeEvent:null, lists:[], offDays:{}, timer:null, version:3};
+    movies:[], picnics:[], tours:[], moves:{}, showDaily:false, mealOptions:{B:[], L:[], D:[]}, lastMenu:{}, events:[], activeEvent:null, lists:[], offDays:{}, period:{}, periodMonth:null, timer:null, version:3};
 }
 
 /* ================= helpers ================= */
@@ -674,7 +685,7 @@ function viewToday(){
       ${open ? `<div class="body">${s.why ? `<div class="small muted">${s.why}</div>` : ""}<div class="checks">${its.map(it => it.from ? moveRow(it, date) : checkItem(it, date)).join("")}</div></div>` : ""}</section>`; }).join("");
   return `${head(new Date().toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long"}), M().showDaily ? "Your routines in the order you do them. The one for right now is open; tap any other to open it." : "Only the tasks that change from day to day. Daily routines are hidden; switch them back on in Plan.",
       `<div class="row" style="gap:6px"><button type="button" data-act="off-form">Day off</button><button type="button" class="primary" data-act="log" data-v="">Log something else</button></div>`)}
-    <div class="stack">${offForm()}${timerCard()}${goalWalk(...walkCounts(Object.values(groups).flat().concat(also), date))}${capCard(p)}
+    <div class="stack">${offForm()}${periodHint()}${timerCard()}${goalWalk(...walkCounts(Object.values(groups).flat().concat(also), date))}${capCard(p)}
     <div class="grid">
       <div class="stack">${stacks || `<div class="empty">Nothing planned today.</div>`}</div>
       <div class="stack">
@@ -724,7 +735,7 @@ function viewTodaySimple(date, p, groups, also, carry){
   const row = it => { const html = it.from || (!it.t.stack && it.kind === "task") ? moveRow(it, date) : checkItem(it, date); return html; };
   return `${head(new Date().toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long"}), "Only what changes from day to day. Your daily routines are hidden; switch them back on in Plan if you miss them.",
       `<div class="row" style="gap:6px"><button type="button" data-act="off-form">Day off</button><button type="button" class="primary" data-act="log" data-v="">Log something else</button></div>`)}
-    <div class="stack">${offForm()}${timerCard()}${goalWalk(...walkCounts(list, date))}
+    <div class="stack">${offForm()}${periodHint()}${timerCard()}${goalWalk(...walkCounts(list, date))}
     <div class="grid">
       <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Today's list</span><span class="prog">${done}/${list.length} · ${fmtMin(mins)}<span class="meter" style="${C("temple")}"><i style="width:${list.length ? done / list.length * 100 : 0}%"></i></span></span></h3>
         ${list.length ? `<div class="checks">${list.map(row).join("")}</div>` : `<div class="empty">Nothing extra today. A free day.</div>`}
@@ -737,7 +748,9 @@ function viewTodaySimple(date, p, groups, also, carry){
       </div>
     </div></div>`;
 }
-const OFF_REASONS = ["Festival","Emergency","Long day out","Travel","Unwell","Just need a break"];
+function periodHint(){ const ci = cycleInfo(); if (!ci.next || ci.inPeriod) return ""; const n = diffDays(ci.next, today()); if (n < 0 || n > 2) return "";
+  return `<section class="card" style="${C("play")};padding:12px 16px"><div class="row between"><span><b>Period expected ${n === 0 ? "around today" : n === 1 ? "tomorrow" : "in 2 days"}</b> <span class="small muted">· ${fmtDate(ci.next)}</span><br><span class="small muted">Keep the next few days light. If it's a heavy day, switch Tend off.</span></span><button type="button" data-act="off-form">Day off</button></div></section>`; }
+const OFF_REASONS = ["Festival","Heavy period day","Emergency","Long day out","Travel","Unwell","Just need a break"];
 function offForm(){
   if (!S.offForm) return "";
   return `<section class="card" style="${C("play")}"><h3><span class="t"><i class="dot"></i>Switch Tend off</span><button type="button" class="ghost" data-act="off-cancel">Cancel</button></h3>
@@ -754,7 +767,7 @@ function viewOff(date, p){
   return `${head(new Date().toLocaleDateString(undefined, {weekday:"long", day:"numeric", month:"long"}), "Tend is switched off. Look after what matters today.")}
   <div class="stack">
   <section class="card" style="${C("play")}"><div class="row between"><div><div class="big" style="font-size:24px">Day off · ${esc(p.off)}</div>
-    <div class="small muted">${until === date ? "Just today" : "Until " + fmtDate(until)}. Nothing is due, nothing piles up, and your streaks are safe.</div></div>
+    <div class="small muted">${until === date ? "Just today" : "Until " + fmtDate(until)}. Nothing is due, nothing piles up, and your streaks are safe.${/period/i.test(p.off) ? " Noted in your period tracker. Heat pad, warm water and rest are the plan." : ""}</div></div>
     <button type="button" data-act="off-end">Switch Tend back on today</button></div></section>
   <div class="grid">
     ${p.items.length ? `<section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Still on today</span></h3><div class="checks">${p.items.map(it => checkItem(it, date)).join("")}</div></section>` : ""}
@@ -922,7 +935,40 @@ function viewDaily(){
   <section class="card"><h3><span class="t"><i class="dot" style="${C("temple")}"></i>Last 7 days</span><span class="small muted">tap a square to fill or clear it</span></h3>
     <div class="scroll"><div class="daygrid"><span></span>${dates.map(d => `<span class="h">${DAYS[wd(d)][0]}</span>`).join("")}
     ${tasks.map(t => `<span class="nm" title="${esc(t.label)}">${esc(t.label)}${streak(t.id) > 1 ? ` <span class="muted">· ${streak(t.id)} in a row</span>` : ""}</span>${dates.map(d => `<button type="button" class="cell ${doneOn(t.id, d) ? "on" : ""}" style="${C(t.area)}" data-act="cell" data-v="${t.id}" data-d="${d}" data-min="${t.min}" aria-pressed="${!!doneOn(t.id, d)}" aria-label="${esc(t.label)} on ${fmtDate(d)}: ${doneOn(t.id, d) ? "done" : "not done"}"></button>`).join("")}`).join("")}</div></div></section>
+  ${periodCard()}
   </div>`;
+}
+
+/* ================= period tracker ================= */
+const FLOW = ["", "light", "medium", "heavy"];
+function cycleInfo(){
+  const per = M().period || {}, days = Object.keys(per).filter(d => per[d]).sort();
+  const starts = days.filter(d => !per[addDays(d, -1)]);
+  const gaps = starts.slice(1).map((d, i) => diffDays(d, starts[i])).filter(g => g >= 15 && g <= 60);
+  const avg = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : 28;
+  const lens = starts.map(st => { let n = 0; while (per[addDays(st, n)]) n++; return n; });
+  const avgLen = lens.length ? Math.round(lens.reduce((a, b) => a + b, 0) / lens.length) : null;
+  const last = starts[starts.length - 1] || null, next = last ? addDays(last, avg) : null;
+  return {last, next, avg, avgLen, measured:gaps.length, inPeriod:!!per[today()]};
+}
+function periodCard(){
+  const m = M(), per = m.period || {}, ci = cycleInfo();
+  const mk = m.periodMonth || today().slice(0, 7), first = mk + "-01", lead = wd(first), dim = new Date(+mk.slice(0, 4), +mk.slice(5, 7), 0).getDate();
+  const cells = Array.from({length:lead}, () => `<span></span>`).concat(Array.from({length:dim}, (_, i) => { const d = `${mk}-${pad2(i + 1)}`, f = per[d] || "";
+    const predicted = !f && ci.next && d >= ci.next && d < addDays(ci.next, ci.avgLen || 5);
+    return `<button type="button" class="pday ${f} ${predicted ? "pred" : ""} ${d === today() ? "today" : ""}" data-act="pday" data-v="${d}" aria-label="${fmtDate(d)}: ${f || (predicted ? "expected" : "no period")}"><span>${i + 1}</span></button>`; })).join("");
+  const label = new Date(+mk.slice(0, 4), +mk.slice(5, 7) - 1, 1).toLocaleDateString(undefined, {month:"long", year:"numeric"});
+  const until = ci.next ? diffDays(ci.next, today()) : null;
+  return `<section class="card" style="${C("play")}"><h3><span class="t"><i class="dot"></i>Period tracker</span><span class="small muted">${window.TEND_STANDALONE ? "private, only on this device" : "private to you"}</span></h3>
+    <div class="tiles">
+      <div class="tile"><span class="k">Last started</span><span class="v" style="font-family:var(--display);font-size:18px;font-weight:700">${ci.last ? fmtDate(ci.last) : "–"}</span></div>
+      <div class="tile"><span class="k">Next expected</span><span class="v" style="font-family:var(--display);font-size:18px;font-weight:700">${ci.next ? fmtDate(ci.next) : "–"}</span><span class="small muted">${ci.inPeriod ? "on your period now" : until === null ? "log a period to start" : until > 0 ? `in ${plural(until, "day")}` : until === 0 ? "around today" : `${plural(-until, "day")} late`}</span></div>
+      <div class="tile"><span class="k">Cycle</span><span class="v" style="font-family:var(--display);font-size:18px;font-weight:700">${ci.avg} days</span><span class="small muted">${ci.measured ? `average of ${plural(ci.measured, "cycle")}` : "assumed until 2 periods are logged"}</span></div>
+    </div>
+    <div class="row between"><button type="button" class="ghost" data-act="pmonth" data-v="-1" aria-label="Previous month">‹</button><b>${label}</b><button type="button" class="ghost" data-act="pmonth" data-v="1" aria-label="Next month">›</button></div>
+    <div class="pcal">${DAYS.map(n => `<span class="h">${n[0]}</span>`).join("")}${cells}</div>
+    <div class="legend">Tap a day: <i class="sw light"></i> light <i class="sw medium"></i> medium <i class="sw heavy"></i> heavy, tap again to clear. <i class="sw pred"></i> expected</div>
+  </section>`;
 }
 
 /* ================= plain lists ================= */
@@ -1135,6 +1181,8 @@ document.addEventListener("click", e => {
       const cut = addDays(d, -100); Object.keys(m.water).forEach(k => { if (k < cut) delete m.water[k]; }); saveMain(); break; }
     case "wday": S.weekDay = +v; draw(); break;
     case "pickday": S.pickDay = +v; draw(); break;
+    case "pday": { m.period = m.period || {}; const nx = FLOW[(FLOW.indexOf(m.period[v] || "") + 1) % 4]; if (nx) m.period[v] = nx; else delete m.period[v]; saveMain(); break; }
+    case "pmonth": { const mk = m.periodMonth || today().slice(0, 7), dt = new Date(+mk.slice(0, 4), +mk.slice(5, 7) - 1 + (+v), 1); m.periodMonth = `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}`; saveMain(); break; }
     case "cell": { const d = b.dataset.d, ex = doneOn(v, d); if (ex) removeLog(ex.id, true);
       else { addLog({task:v, date:d, min:+b.dataset.min || 0, hour:21, late:true}); toast(`${task(v).label} marked done for ${fmtDate(d)}.`); } break; }
     case "off-form": S.offForm = true; draw(); break;
@@ -1224,7 +1272,8 @@ document.addEventListener("submit", e => {
   if (k === "supply" && t) m.supply.push({t, w:""});
   else if (k === "off"){ let a = String(fd.get("from")), z = String(fd.get("to") || a); if (!a) return; if (z < a) [a, z] = [z, a];
     if (diffDays(z, a) > 60){ toast("That's more than two months. Pick a shorter stretch, or pause an area in Plan instead."); return; }
-    m.offDays = m.offDays || {}; for (let d = a; d <= z; d = addDays(d, 1)) m.offDays[d] = String(fd.get("why") || "Day off");
+    m.offDays = m.offDays || {}; const why = String(fd.get("why") || "Day off");
+    for (let d = a; d <= z; d = addDays(d, 1)){ m.offDays[d] = why; if (/period/i.test(why)){ m.period = m.period || {}; m.period[d] = "heavy"; } }
     const cut = addDays(today(), -120); Object.keys(m.offDays).forEach(d => { if (d < cut) delete m.offDays[d]; });
     S.offForm = false; toast(a === z ? `Day off on ${fmtDate(a)}. Rest well.` : `Days off from ${fmtDate(a)} to ${fmtDate(z)}.`); }
   else if (k === "task-edit"){ const id = form.dataset.id, before = task(id), label = String(fd.get("label") || "").trim().slice(0, 60); if (!label) return;
